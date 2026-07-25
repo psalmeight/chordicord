@@ -10,9 +10,11 @@ import dayjs from 'dayjs';
 import api, { apiError } from '@/lib/api';
 import { canEdit } from '@/lib/auth';
 import { keyOptions } from '@/lib/chords';
+import { groupNotes } from '@/lib/noteColors';
 import { useApp } from '@/contexts/AppContext';
 import AudioPlayer from '@/components/AudioPlayer';
 import ChordChart from '@/components/ChordChart';
+import { NoteCardList } from '@/components/NoteCardView';
 import type { Setlist, SetlistItem, Song } from '@/types';
 
 export default function SetlistView() {
@@ -254,6 +256,7 @@ export default function SetlistView() {
             // No song key means no anchor to transpose from, so the per-service
             // key picker is unavailable and the chart renders as written.
             const displayKey = item.keyOverride ?? item.key ?? '';
+            const notes = groupNotes(item.noteCards);
             return (
               <Box key={item.id} bg="white" p={5} borderRadius="lg" borderWidth="1px">
                 <Flex justify="space-between" align="start" gap={3} wrap="wrap">
@@ -339,9 +342,17 @@ export default function SetlistView() {
                   </Box>
                 )}
 
-                {item.content.trim() && (
+                {(item.content.trim() || notes.general.length > 0) && (
                   <Box mt={4} pt={4} borderTopWidth="1px">
-                    <ChordChart content={item.content} fromKey={item.key ?? ''} toKey={displayKey} />
+                    <NoteCardList cards={notes.general} />
+                    <Box mt={notes.general.length ? 3 : 0}>
+                      <ChordChart
+                        content={item.content}
+                        fromKey={item.key ?? ''}
+                        toKey={displayKey}
+                        sectionNotes={notes.bySection}
+                      />
+                    </Box>
                   </Box>
                 )}
               </Box>

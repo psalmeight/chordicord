@@ -84,6 +84,7 @@ export interface SetlistItem {
   tempo: number | null;
   feel: string;
   content: string;
+  noteCards: NoteCard[];
   /** Whether the song has a reference recording to play along with. */
   hasAudio: boolean;
   /** The recording's own saved tune — the fallback when tuneOffset is null. */

@@ -132,15 +132,16 @@ type SetlistItem struct {
 	Position    int     `db:"position" json:"position"`
 	KeyOverride *string `db:"key_override" json:"keyOverride"`
 	// Per-setlist tune override; nil falls back to AudioTuneOffset.
-	TuneOffset    *int    `db:"tune_offset" json:"tuneOffset"`
-	Notes         string  `db:"notes" json:"notes"`
-	Title         string  `db:"title" json:"title"`
-	Artist        string  `db:"artist" json:"artist"`
-	SongKey       *string `db:"song_key" json:"key"`
-	TimeSignature string  `db:"time_signature" json:"timeSignature"`
-	Tempo         *int    `db:"tempo" json:"tempo"`
-	Feel          string  `db:"feel" json:"feel"`
-	Content       string  `db:"content" json:"content"`
+	TuneOffset    *int      `db:"tune_offset" json:"tuneOffset"`
+	Notes         string    `db:"notes" json:"notes"`
+	Title         string    `db:"title" json:"title"`
+	Artist        string    `db:"artist" json:"artist"`
+	SongKey       *string   `db:"song_key" json:"key"`
+	TimeSignature string    `db:"time_signature" json:"timeSignature"`
+	Tempo         *int      `db:"tempo" json:"tempo"`
+	Feel          string    `db:"feel" json:"feel"`
+	Content       string    `db:"content" json:"content"`
+	NoteCards     NoteCards `db:"note_cards" json:"noteCards"`
 	// Joined from song_audio so the setlist view can offer play-along in one
 	// query. AudioTuneOffset is the recording's own saved tune (the fallback).
 	HasAudio        bool `db:"has_audio" json:"hasAudio"`

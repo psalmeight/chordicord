@@ -42,7 +42,7 @@ func GetSetlist(database *sqlx.DB) gin.HandlerFunc {
 		items := []models.SetlistItem{}
 		err = database.Select(&items, `
 			SELECT i.id, i.setlist_id, i.song_id, i.position, i.key_override, i.tune_offset, i.notes,
-			       s.title, s.artist, s.song_key, s.time_signature, s.tempo, s.feel, s.content,
+			       s.title, s.artist, s.song_key, s.time_signature, s.tempo, s.feel, s.content, s.note_cards,
 			       (a.song_id IS NOT NULL) AS has_audio,
 			       COALESCE(a.tune_offset, 0) AS audio_tune_offset
 			FROM setlist_items i
