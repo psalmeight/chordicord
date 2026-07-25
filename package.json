@@ -1,0 +1,19 @@
+{
+  "name": "transcode",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["web"],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "cd api && go run .",
+    "dev:web": "npm run dev --workspace web",
+    "build": "npm run build --workspace web",
+    "test": "npm run test --workspace web",
+    "db:setup": "cd api && go run ./cmd/migrate -schema",
+    "db:migrate": "cd api && go run ./cmd/migrate",
+    "db:seed": "cd api && go run ./cmd/seed"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

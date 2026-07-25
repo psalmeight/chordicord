@@ -1,0 +1,214 @@
+import {
+  Badge, Box, Button, Flex, HStack, Heading, Spinner, Stack, Text,
+} from '@chakra-ui/react';
+import { ArrowLeft, ChevronDown, ChevronUp, Plus, Printer, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import dayjs from 'dayjs';
+import api, { apiError } from '@/lib/api';
+import { canEdit } from '@/lib/auth';
+import { keyOptions } from '@/lib/chords';
+import { useApp } from '@/contexts/AppContext';
+import ChordChart from '@/components/ChordChart';
+import type { Setlist, SetlistItem, Song } from '@/types';
+
+export default function SetlistView() {
+  const { id } = useParams();
+  const { user } = useApp();
+  const [setlist, setSetlist] = useState<Setlist | null>(null);
+  const [items, setItems] = useState<SetlistItem[]>([]);
+  const [songs, setSongs] = useState<Song[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = () =>
+    api
+      .get<{ setlist: Setlist; items: SetlistItem[] }>(`/api/setlists/${id}`)
+      .then(({ data }) => {
+        setSetlist(data.setlist);
+        setItems(data.items);
+      })
+      .catch((err) => setError(apiError(err, 'Could not load setlist')));
+
+  useEffect(() => {
+    load();
+  }, [id]);
+
+  useEffect(() => {
+    if (adding && songs.length === 0) {
+      api.get<Song[]>('/api/songs').then(({ data }) => setSongs(data)).catch(() => {});
+    }
+  }, [adding, songs.length]);
+
+  const editable = canEdit(user);
+
+  const addSong = async (songId: string) => {
+    await api.post(`/api/setlists/${id}/items`, { songId });
+    setAdding(false);
+    load();
+  };
+
+  const setKey = async (item: SetlistItem, key: string) => {
+    // Selecting the song's own key clears the override rather than storing a
+    // redundant one, so later edits to the song's key still flow through.
+    const clearKey = key === item.key;
+    await api.patch(`/api/setlists/${id}/items/${item.id}`, {
+      keyOverride: clearKey ? null : key,
+      clearKey,
+    });
+    load();
+  };
+
+  const move = async (index: number, delta: number) => {
+    const next = [...items];
+    const target = index + delta;
+    if (target < 0 || target >= next.length) return;
+    [next[index], next[target]] = [next[target], next[index]];
+    setItems(next); // optimistic
+    await api.post(`/api/setlists/${id}/reorder`, { itemIds: next.map((i) => i.id) });
+  };
+
+  const remove = async (itemId: string) => {
+    await api.delete(`/api/setlists/${id}/items/${itemId}`);
+    load();
+  };
+
+  if (error) return <Text color="red.600">{error}</Text>;
+  if (!setlist) return <Spinner />;
+
+  return (
+    <Stack gap={4}>
+      <Flex justify="space-between" align="center" wrap="wrap" gap={3} className="no-print">
+        <Link to="/setlists">
+          <Button size="sm" variant="ghost">
+            <ArrowLeft size={16} />
+            <Text ml={1}>Setlists</Text>
+          </Button>
+        </Link>
+        <HStack gap={2}>
+          <Button size="sm" variant="outline" onClick={() => window.print()}>
+            <Printer size={16} />
+          </Button>
+          {editable && (
+            <Button size="sm" colorPalette="blue" onClick={() => setAdding((v) => !v)}>
+              <Plus size={16} />
+              <Text ml={1}>Add song</Text>
+            </Button>
+          )}
+        </HStack>
+      </Flex>
+
+      <Box>
+        <Heading size="xl">{setlist.name}</Heading>
+        {setlist.serviceDate && (
+          <Text color="gray.600">{dayjs(setlist.serviceDate).format('dddd, D MMMM YYYY')}</Text>
+        )}
+      </Box>
+
+      {adding && (
+        <Box bg="white" p={4} borderRadius="lg" borderWidth="1px" maxH="300px" overflowY="auto" className="no-print">
+          <Stack gap={1}>
+            {songs.map((song) => (
+              <Flex
+                key={song.id}
+                justify="space-between"
+                align="center"
+                p={2}
+                borderRadius="md"
+                cursor="pointer"
+                _hover={{ bg: 'gray.50' }}
+                onClick={() => addSong(song.id)}
+              >
+                <Text>{song.title}</Text>
+                <Badge variant={song.key ? 'solid' : 'outline'}>{song.key ?? 'No key'}</Badge>
+              </Flex>
+            ))}
+          </Stack>
+        </Box>
+      )}
+
+      {items.length === 0 ? (
+        <Box bg="white" p={8} borderRadius="lg" borderWidth="1px" textAlign="center">
+          <Text color="gray.600">No songs in this setlist yet.</Text>
+        </Box>
+      ) : (
+        <Stack gap={4}>
+          {items.map((item, index) => {
+            // No song key means no anchor to transpose from, so the per-service
+            // key picker is unavailable and the chart renders as written.
+            const displayKey = item.keyOverride ?? item.key ?? '';
+            return (
+              <Box key={item.id} bg="white" p={5} borderRadius="lg" borderWidth="1px">
+                <Flex justify="space-between" align="start" gap={3} wrap="wrap">
+                  <Box>
+                    <HStack gap={2}>
+                      <Text color="gray.400" fontWeight="bold">
+                        {index + 1}
+                      </Text>
+                      <Link to={`/songs/${item.songId}`}>
+                        <Text fontWeight="semibold" fontSize="lg">
+                          {item.title}
+                        </Text>
+                      </Link>
+                    </HStack>
+                    <HStack gap={3} fontSize="sm" color="gray.600" mt={1} ml={6}>
+                      <Text>{item.timeSignature}</Text>
+                      {item.tempo && <Text>{item.tempo} bpm</Text>}
+                      {item.feel && <Text>{item.feel}</Text>}
+                      {item.keyOverride && item.keyOverride !== item.key && (
+                        <Badge colorPalette="orange">from {item.key}</Badge>
+                      )}
+                    </HStack>
+                  </Box>
+
+                  <HStack gap={2} className="no-print">
+                    {item.key ? (
+                      <select
+                        value={displayKey}
+                        onChange={(e) => setKey(item, e.target.value)}
+                        disabled={!editable}
+                        style={{
+                          padding: '6px 10px',
+                          borderRadius: 6,
+                          border: '1px solid #CBD5E0',
+                          fontWeight: 600,
+                        }}
+                      >
+                        {keyOptions(item.key).map((opt) => (
+                          <option key={opt.key} value={opt.key}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <Badge colorPalette="gray" variant="outline">No key</Badge>
+                    )}
+                    {editable && (
+                      <>
+                        <Button size="xs" variant="outline" onClick={() => move(index, -1)}>
+                          <ChevronUp size={14} />
+                        </Button>
+                        <Button size="xs" variant="outline" onClick={() => move(index, 1)}>
+                          <ChevronDown size={14} />
+                        </Button>
+                        <Button size="xs" variant="ghost" colorPalette="red" onClick={() => remove(item.id)}>
+                          <X size={14} />
+                        </Button>
+                      </>
+                    )}
+                  </HStack>
+                </Flex>
+
+                {item.content.trim() && (
+                  <Box mt={4} pt={4} borderTopWidth="1px">
+                    <ChordChart content={item.content} fromKey={item.key ?? ''} toKey={displayKey} />
+                  </Box>
+                )}
+              </Box>
+            );
+          })}
+        </Stack>
+      )}
+    </Stack>
+  );
+}

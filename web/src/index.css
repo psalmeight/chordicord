@@ -1,0 +1,38 @@
+:root {
+  /* Chrome — nav, forms, buttons. Fixed: the font preference exists for
+     reading charts, not for restyling the shell. */
+  --app-font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  /* Charts and the editor preview. Overwritten by AppContext from the stored
+     preference; the full stack lives here so first paint already matches.
+     Century Gothic ships with MS Office rather than the OS, hence the
+     lookalikes ahead of the generic fallback. */
+  --chart-font: 'Century Gothic', CenturyGothic, 'URW Gothic', 'URW Gothic L', AppleGothic,
+    'Questrial', 'Didact Gothic', 'Trebuchet MS', sans-serif;
+
+  font-family: var(--app-font);
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  font-family: var(--app-font);
+}
+
+/* Chord charts, the editor preview and the ChordPro textarea. Alignment
+   doesn't depend on a monospace grid — ChordChart lays each chord/syllable
+   pair out as its own inline-block column — so the tracking below is free to
+   open the letters up without shifting chords off their syllables. */
+.chart {
+  font-family: var(--chart-font);
+  letter-spacing: 0.02em;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  .chart {
+    font-size: 11pt;
+  }
+}
