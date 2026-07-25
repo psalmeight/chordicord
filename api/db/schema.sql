@@ -63,6 +63,9 @@ CREATE TABLE IF NOT EXISTS "setlist_items" (
 	"position" integer NOT NULL DEFAULT 0,
 	-- Per-performance key. NULL means "play it in the song's own key".
 	"key_override" varchar(12),
+	-- Per-performance pitch offset for the reference track, in semitones.
+	-- NULL means "use the recording's own saved tune" (song_audio.tune_offset).
+	"tune_offset" smallint,
 	"notes" text NOT NULL DEFAULT ''
 );
 
@@ -76,6 +79,8 @@ CREATE TABLE IF NOT EXISTS "song_audio" (
 	"storage_path" text NOT NULL,
 	"filename" varchar(255) NOT NULL DEFAULT '',
 	"size_bytes" bigint NOT NULL DEFAULT 0,
+	-- Saved pitch offset in semitones, applied on playback. 0 = original pitch.
+	"tune_offset" smallint NOT NULL DEFAULT 0,
 	"uploaded_by" uuid REFERENCES "users"("id") ON DELETE SET NULL,
 	"created_at" timestamp DEFAULT now() NOT NULL
 );

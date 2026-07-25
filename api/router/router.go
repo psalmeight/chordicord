@@ -64,6 +64,7 @@ func New(database *sqlx.DB, cfg *config.Config) *gin.Engine {
 	songs.GET("/:id/audio", handlers.GetAudio(database, store))
 	songs.POST("/:id/audio/upload-url", editors, handlers.CreateAudioUploadURL(database, store, cfg))
 	songs.POST("/:id/audio", editors, handlers.ConfirmAudio(database, store, cfg))
+	songs.PATCH("/:id/audio", editors, handlers.UpdateAudioTune(database))
 	songs.DELETE("/:id/audio", editors, handlers.DeleteAudio(database, store))
 
 	// Library-wide audio usage, for the "you're at the limit" manager.

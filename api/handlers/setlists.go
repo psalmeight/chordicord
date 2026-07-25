@@ -41,10 +41,13 @@ func GetSetlist(database *sqlx.DB) gin.HandlerFunc {
 
 		items := []models.SetlistItem{}
 		err = database.Select(&items, `
-			SELECT i.id, i.setlist_id, i.song_id, i.position, i.key_override, i.notes,
-			       s.title, s.artist, s.song_key, s.time_signature, s.tempo, s.feel, s.content
+			SELECT i.id, i.setlist_id, i.song_id, i.position, i.key_override, i.tune_offset, i.notes,
+			       s.title, s.artist, s.song_key, s.time_signature, s.tempo, s.feel, s.content,
+			       (a.song_id IS NOT NULL) AS has_audio,
+			       COALESCE(a.tune_offset, 0) AS audio_tune_offset
 			FROM setlist_items i
 			JOIN songs s ON s.id = i.song_id
+			LEFT JOIN song_audio a ON a.song_id = i.song_id
 			WHERE i.setlist_id = $1
 			ORDER BY i.position`, id)
 		if err != nil {
@@ -162,7 +165,11 @@ func UpdateSetlistItem(database *sqlx.DB) gin.HandlerFunc {
 		var body struct {
 			KeyOverride *string `json:"keyOverride"`
 			ClearKey    bool    `json:"clearKey"`
-			Notes       *string `json:"notes"`
+			// nil leaves the tune override untouched; ClearTune resets it to the
+			// recording's own saved tune, mirroring ClearKey for key_override.
+			TuneOffset *int    `json:"tuneOffset"`
+			ClearTune  bool    `json:"clearTune"`
+			Notes      *string `json:"notes"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(400, gin.H{"error": "Invalid request"})
@@ -171,9 +178,11 @@ func UpdateSetlistItem(database *sqlx.DB) gin.HandlerFunc {
 		_, err := database.Exec(`
 			UPDATE setlist_items SET
 				key_override = CASE WHEN $1 THEN NULL ELSE COALESCE($2, key_override) END,
-				notes        = COALESCE($3, notes)
-			WHERE id = $4 AND setlist_id = $5`,
-			body.ClearKey, body.KeyOverride, body.Notes, c.Param("itemId"), c.Param("id"))
+				tune_offset  = CASE WHEN $3 THEN NULL ELSE COALESCE($4, tune_offset) END,
+				notes        = COALESCE($5, notes)
+			WHERE id = $6 AND setlist_id = $7`,
+			body.ClearKey, body.KeyOverride, body.ClearTune, body.TuneOffset,
+			body.Notes, c.Param("itemId"), c.Param("id"))
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Failed to update item"})
 			return

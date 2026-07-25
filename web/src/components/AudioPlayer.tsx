@@ -1,5 +1,5 @@
 import { Box, Button, Flex, HStack, Spinner, Text } from '@chakra-ui/react';
-import { Minus, Music2, Pause, Play, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { Check, Minus, Music2, Pause, Play, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import api, { apiError } from '@/lib/api';
 import { formatTime, useAudioPlayer } from '@/lib/useAudioPlayer';
@@ -8,36 +8,63 @@ import type { SongAudio } from '@/types';
 interface Props {
   songId: string;
   canEdit: boolean;
-  onRemoved: () => void;
+  /** When provided (and canEdit), a remove control is shown. */
+  onRemoved?: () => void;
+  /**
+   * Baseline saved tune, in semitones. Provide it in a setlist, where the tune
+   * comes from the item (or the recording's default). Omit it on a song page —
+   * the player then adopts the recording's own saved tune once it loads.
+   */
+  tuneOverride?: number;
+  /** When provided (and canEdit), a Save appears once the tune is changed. */
+  onSaveTune?: (semitones: number) => Promise<void>;
 }
 
 /** Beyond this the artefacts swamp the reference — transpose the chart instead. */
 const MAX_SHIFT = 6;
 
+const clampShift = (n: number) => Math.max(-MAX_SHIFT, Math.min(MAX_SHIFT, n));
+
 /**
- * Plays the attached reference track with its own pitch control.
+ * Plays the attached reference track with its own saved pitch control.
  *
- * Deliberately not tied to the chart's key selector. The stored key describes
- * the chart, not the recording, and the two often disagree — a track cut in a
- * different key, or a tape running slightly sharp, would be shifted by a real
- * but wrong interval. Songs with no key set would get no control at all. So
- * this is a plain offset from whatever the recording actually is.
+ * The offset is deliberately independent of the chart's key selector: the
+ * stored key describes the chart, not the recording, and the two often
+ * disagree — a track cut in a different key, or a tape running slightly sharp,
+ * would be shifted by a real but wrong interval. So this is a plain offset from
+ * whatever the recording actually is. Unlike the chart controls it *is*
+ * persisted (per recording, or per setlist item) so the whole team plays along
+ * at the same pitch.
  */
-export default function AudioPlayer({ songId, canEdit, onRemoved }: Props) {
+export default function AudioPlayer({ songId, canEdit, onRemoved, tuneOverride, onSaveTune }: Props) {
   const [track, setTrack] = useState<SongAudio | null>(null);
   const [loadError, setLoadError] = useState('');
   const [removing, setRemoving] = useState(false);
-  const [semitones, setSemitones] = useState(0);
+  const [semitones, setSemitones] = useState(clampShift(tuneOverride ?? 0));
+  // The persisted baseline, so we can tell when there's an unsaved change.
+  const [saved, setSaved] = useState(clampShift(tuneOverride ?? 0));
+  // In a setlist the baseline is given; on a song page we adopt it from the
+  // recording once, on load, without clobbering a mid-session adjustment.
+  const tuneInitialised = useRef(tuneOverride !== undefined);
+  const [savingTune, setSavingTune] = useState(false);
+  const [tuneError, setTuneError] = useState('');
   const barRef = useRef<HTMLDivElement>(null);
 
-  const shiftBy = (delta: number) =>
-    setSemitones((s) => Math.max(-MAX_SHIFT, Math.min(MAX_SHIFT, s + delta)));
+  const shiftBy = (delta: number) => setSemitones((s) => clampShift(s + delta));
 
   useEffect(() => {
     let cancelled = false;
     api
       .get<SongAudio>(`/api/songs/${songId}/audio`)
-      .then(({ data }) => !cancelled && setTrack(data))
+      .then(({ data }) => {
+        if (cancelled) return;
+        setTrack(data);
+        if (!tuneInitialised.current) {
+          setSemitones(clampShift(data.tuneOffset));
+          setSaved(clampShift(data.tuneOffset));
+          tuneInitialised.current = true;
+        }
+      })
       .catch((err) => !cancelled && setLoadError(apiError(err, 'Could not load the track')));
     return () => {
       cancelled = true;
@@ -47,6 +74,7 @@ export default function AudioPlayer({ songId, canEdit, onRemoved }: Props) {
   const player = useAudioPlayer(track?.url ?? null, semitones);
 
   const remove = async () => {
+    if (!onRemoved) return;
     if (!window.confirm('Remove this track? It frees a slot in the library.')) return;
     setRemoving(true);
     try {
@@ -56,6 +84,20 @@ export default function AudioPlayer({ songId, canEdit, onRemoved }: Props) {
     } catch (err) {
       setLoadError(apiError(err, 'Could not remove the track'));
       setRemoving(false);
+    }
+  };
+
+  const saveTune = async () => {
+    if (!onSaveTune) return;
+    setSavingTune(true);
+    setTuneError('');
+    try {
+      await onSaveTune(semitones);
+      setSaved(semitones);
+    } catch (err) {
+      setTuneError(apiError(err, 'Could not save the tune'));
+    } finally {
+      setSavingTune(false);
     }
   };
 
@@ -74,6 +116,8 @@ export default function AudioPlayer({ songId, canEdit, onRemoved }: Props) {
     semitones === 0
       ? 'Original pitch'
       : `${semitones > 0 ? '+' : ''}${semitones} ${Math.abs(semitones) === 1 ? 'semitone' : 'semitones'}`;
+  const canSaveTune = canEdit && Boolean(onSaveTune);
+  const dirty = canSaveTune && semitones !== saved;
 
   return (
     <Box>
@@ -146,15 +190,31 @@ export default function AudioPlayer({ songId, canEdit, onRemoved }: Props) {
               <RotateCcw size={12} />
             </Button>
           )}
+          {dirty && (
+            <Button size="xs" colorPalette="blue" variant="subtle" onClick={saveTune} loading={savingTune}>
+              <Check size={12} />
+              <Text ml={1}>Save tune</Text>
+            </Button>
+          )}
         </HStack>
 
-        {canEdit && (
+        {canEdit && onRemoved && (
           <Button size="xs" variant="ghost" colorPalette="red" onClick={remove} loading={removing}>
             <Trash2 size={14} />
           </Button>
         )}
       </Flex>
 
+      {tuneError && (
+        <Text fontSize="sm" color="red.600" mt={2}>
+          {tuneError}
+        </Text>
+      )}
+      {canSaveTune && !dirty && saved !== 0 && (
+        <Text fontSize="xs" color="gray.500" mt={2}>
+          Saved tune: {saved > 0 ? '+' : ''}{saved} — everyone plays along at this pitch.
+        </Text>
+      )}
       {player.status === 'loading' && (
         <Text fontSize="xs" color="gray.500" mt={2}>
           Decoding the track — pitch shifting needs the whole file in memory, so this takes a moment.

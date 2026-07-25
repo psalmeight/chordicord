@@ -187,7 +187,7 @@ export default function SongView() {
         )}
       </Box>
 
-      {/* Reference track. Pitch tracks the displayed key automatically. */}
+      {/* Reference track. Its pitch offset is a saved, chart-independent tune. */}
       {(hasAudio || canEdit(user)) && (
         <Box bg="white" p={4} borderRadius="lg" borderWidth="1px" className="no-print">
           {hasAudio ? (
@@ -197,6 +197,9 @@ export default function SongView() {
                 songId={song.id}
                 canEdit={canEdit(user)}
                 onRemoved={() => setHasAudio(false)}
+                onSaveTune={async (semitones) => {
+                  await api.patch(`/api/songs/${song.id}/audio`, { tuneOffset: semitones });
+                }}
               />
               {canEdit(user) && (
                 <AudioUpload

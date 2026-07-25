@@ -5,8 +5,12 @@ import { ArrowLeft, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import api, { apiError } from '@/lib/api';
+import { canEdit } from '@/lib/auth';
 import { KEYS } from '@/lib/chords';
 import { hasChords, transposeContent } from '@/lib/chordpro';
+import { useApp } from '@/contexts/AppContext';
+import AudioPlayer from '@/components/AudioPlayer';
+import AudioUpload from '@/components/AudioUpload';
 import ChordChart from '@/components/ChordChart';
 import type { Song } from '@/types';
 
@@ -24,7 +28,14 @@ That [G]saved a wretch like [D]me
 export default function SongEditor() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useApp();
   const isNew = !id;
+  const editable = canEdit(user);
+
+  // Reference-track state. The player lets you save its tune from edit mode too.
+  const [hasAudio, setHasAudio] = useState(false);
+  // Bumped on upload so the player remounts and pulls a fresh signed URL.
+  const [audioVersion, setAudioVersion] = useState(0);
 
   const [form, setForm] = useState({
     title: '',
@@ -60,6 +71,7 @@ export default function SongEditor() {
       .get<Song>(`/api/songs/${id}`)
       .then(({ data }) => {
         setContentKey(data.key ?? '');
+        setHasAudio(data.hasAudio);
         setForm({
           title: data.title,
           artist: data.artist,
@@ -271,6 +283,43 @@ export default function SongEditor() {
           </Field>
         </Stack>
       </Box>
+
+      {!isNew && (hasAudio || editable) && (
+        <Box bg="white" p={5} borderRadius="lg" borderWidth="1px">
+          <Text fontWeight="medium" mb={1}>
+            Reference track
+          </Text>
+          <Text fontSize="xs" color="gray.600" mb={3}>
+            Play along and set the recording's saved tune — its pitch offset is
+            independent of the chart key and is shared with the whole team.
+          </Text>
+          {hasAudio ? (
+            <Stack gap={3}>
+              <AudioPlayer
+                key={`${id}-${audioVersion}`}
+                songId={id!}
+                canEdit={editable}
+                onRemoved={() => setHasAudio(false)}
+                onSaveTune={async (semitones) => {
+                  await api.patch(`/api/songs/${id}/audio`, { tuneOffset: semitones });
+                }}
+              />
+              {editable && (
+                <AudioUpload songId={id!} hasExisting onUploaded={() => setAudioVersion((v) => v + 1)} />
+              )}
+            </Stack>
+          ) : (
+            <AudioUpload
+              songId={id!}
+              hasExisting={false}
+              onUploaded={() => {
+                setHasAudio(true);
+                setAudioVersion((v) => v + 1);
+              }}
+            />
+          )}
+        </Box>
+      )}
 
       <Grid templateColumns={{ base: '1fr', lg: '1fr 1fr' }} gap={4}>
         <Box bg="white" p={5} borderRadius="lg" borderWidth="1px">

@@ -114,6 +114,15 @@ func Migrate(database *sqlx.DB) {
 		// would erase correct keys to fix incorrect ones.
 		`ALTER TABLE songs ALTER COLUMN song_key DROP DEFAULT;`,
 		`ALTER TABLE songs ALTER COLUMN song_key DROP NOT NULL;`,
+
+		// A saved pitch offset for the reference recording, in semitones. It
+		// belongs to the track, not the chart — the recording may sit in a
+		// different key or run a touch sharp — so it lives on song_audio and is
+		// shared team-wide. 0 is the recording's original pitch.
+		`ALTER TABLE song_audio ADD COLUMN IF NOT EXISTS tune_offset smallint NOT NULL DEFAULT 0;`,
+		// Per-setlist override of that tune. NULL means "use the recording's
+		// saved tune", mirroring how key_override falls back to the song key.
+		`ALTER TABLE setlist_items ADD COLUMN IF NOT EXISTS tune_offset smallint;`,
 	}
 
 	for _, s := range stmts {

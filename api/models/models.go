@@ -18,9 +18,9 @@ type User struct {
 }
 
 type Song struct {
-	ID            string         `db:"id" json:"id"`
-	Title         string         `db:"title" json:"title"`
-	Artist        string         `db:"artist" json:"artist"`
+	ID     string `db:"id" json:"id"`
+	Title  string `db:"title" json:"title"`
+	Artist string `db:"artist" json:"artist"`
 	// nil when the key hasn't been established — never coerced to "C".
 	SongKey       *string        `db:"song_key" json:"key"`
 	TimeSignature string         `db:"time_signature" json:"timeSignature"`
@@ -47,13 +47,15 @@ type SongWithAuthor struct {
 // SongAudio points at a reference recording in Supabase Storage. StoragePath
 // is server-side detail — clients only ever get a short-lived signed URL.
 type SongAudio struct {
-	ID          string    `db:"id" json:"id"`
-	SongID      string    `db:"song_id" json:"songId"`
-	StoragePath string    `db:"storage_path" json:"-"`
-	Filename    string    `db:"filename" json:"filename"`
-	SizeBytes   int64     `db:"size_bytes" json:"sizeBytes"`
-	UploadedBy  *string   `db:"uploaded_by" json:"uploadedBy"`
-	CreatedAt   time.Time `db:"created_at" json:"createdAt"`
+	ID          string `db:"id" json:"id"`
+	SongID      string `db:"song_id" json:"songId"`
+	StoragePath string `db:"storage_path" json:"-"`
+	Filename    string `db:"filename" json:"filename"`
+	SizeBytes   int64  `db:"size_bytes" json:"sizeBytes"`
+	// Saved playback pitch offset in semitones. 0 = the recording as uploaded.
+	TuneOffset int       `db:"tune_offset" json:"tuneOffset"`
+	UploadedBy *string   `db:"uploaded_by" json:"uploadedBy"`
+	CreatedAt  time.Time `db:"created_at" json:"createdAt"`
 }
 
 // AudioListItem is the projection behind the "you're at the limit" manager —
@@ -77,11 +79,13 @@ type Setlist struct {
 
 // SetlistItem carries the joined song fields so a setlist renders in one query.
 type SetlistItem struct {
-	ID            string  `db:"id" json:"id"`
-	SetlistID     string  `db:"setlist_id" json:"setlistId"`
-	SongID        string  `db:"song_id" json:"songId"`
-	Position      int     `db:"position" json:"position"`
-	KeyOverride   *string `db:"key_override" json:"keyOverride"`
+	ID          string  `db:"id" json:"id"`
+	SetlistID   string  `db:"setlist_id" json:"setlistId"`
+	SongID      string  `db:"song_id" json:"songId"`
+	Position    int     `db:"position" json:"position"`
+	KeyOverride *string `db:"key_override" json:"keyOverride"`
+	// Per-setlist tune override; nil falls back to AudioTuneOffset.
+	TuneOffset    *int    `db:"tune_offset" json:"tuneOffset"`
 	Notes         string  `db:"notes" json:"notes"`
 	Title         string  `db:"title" json:"title"`
 	Artist        string  `db:"artist" json:"artist"`
@@ -90,4 +94,8 @@ type SetlistItem struct {
 	Tempo         *int    `db:"tempo" json:"tempo"`
 	Feel          string  `db:"feel" json:"feel"`
 	Content       string  `db:"content" json:"content"`
+	// Joined from song_audio so the setlist view can offer play-along in one
+	// query. AudioTuneOffset is the recording's own saved tune (the fallback).
+	HasAudio        bool `db:"has_audio" json:"hasAudio"`
+	AudioTuneOffset int  `db:"audio_tune_offset" json:"audioTuneOffset"`
 }

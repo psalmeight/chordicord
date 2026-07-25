@@ -1,25 +1,36 @@
 import {
-  Badge, Box, Button, Flex, HStack, Heading, Spinner, Stack, Text,
+  Badge, Box, Button, Flex, HStack, Heading, Input, Spinner, Stack, Text, Textarea,
 } from '@chakra-ui/react';
-import { ArrowLeft, ChevronDown, ChevronUp, Plus, Printer, X } from 'lucide-react';
+import {
+  ArrowLeft, ChevronDown, ChevronUp, Music2, Pencil, Plus, Printer, Trash2, X,
+} from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import api, { apiError } from '@/lib/api';
 import { canEdit } from '@/lib/auth';
 import { keyOptions } from '@/lib/chords';
 import { useApp } from '@/contexts/AppContext';
+import AudioPlayer from '@/components/AudioPlayer';
 import ChordChart from '@/components/ChordChart';
 import type { Setlist, SetlistItem, Song } from '@/types';
 
 export default function SetlistView() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { user } = useApp();
   const [setlist, setSetlist] = useState<Setlist | null>(null);
   const [items, setItems] = useState<SetlistItem[]>([]);
   const [songs, setSongs] = useState<Song[]>([]);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState('');
+  // Which items have their play-along player mounted. Kept lazy: each track is
+  // fully decoded into memory, so we never mount all of them at once.
+  const [openPlayers, setOpenPlayers] = useState<Record<string, boolean>>({});
+  // Setlist detail editing (rename / date / notes / delete).
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState({ name: '', serviceDate: '', notes: '' });
+  const [savingSetlist, setSavingSetlist] = useState(false);
 
   const load = () =>
     api
@@ -73,6 +84,60 @@ export default function SetlistView() {
     load();
   };
 
+  const togglePlayer = (itemId: string) =>
+    setOpenPlayers((prev) => ({ ...prev, [itemId]: !prev[itemId] }));
+
+  // Saving the recording's own tune clears the per-setlist override, mirroring
+  // how choosing the song's own key clears key_override. Updated locally so the
+  // open player doesn't remount and re-decode the track.
+  const saveTune = (item: SetlistItem) => async (semitones: number) => {
+    const clearTune = semitones === item.audioTuneOffset;
+    await api.patch(`/api/setlists/${id}/items/${item.id}`, {
+      tuneOffset: clearTune ? null : semitones,
+      clearTune,
+    });
+    setItems((prev) =>
+      prev.map((it) => (it.id === item.id ? { ...it, tuneOffset: clearTune ? null : semitones } : it)),
+    );
+  };
+
+  const startEdit = () => {
+    setEditForm({
+      name: setlist!.name,
+      serviceDate: setlist!.serviceDate ? dayjs(setlist!.serviceDate).format('YYYY-MM-DD') : '',
+      notes: setlist!.notes,
+    });
+    setEditing(true);
+  };
+
+  const saveSetlist = async () => {
+    if (!editForm.name.trim()) return;
+    setSavingSetlist(true);
+    try {
+      await api.patch(`/api/setlists/${id}`, {
+        name: editForm.name.trim(),
+        serviceDate: editForm.serviceDate || null,
+        notes: editForm.notes,
+      });
+      setEditing(false);
+      load();
+    } catch (err) {
+      setError(apiError(err, 'Could not save setlist'));
+    } finally {
+      setSavingSetlist(false);
+    }
+  };
+
+  const deleteSetlist = async () => {
+    if (!window.confirm(`Delete "${setlist!.name}"? This removes the setlist, not the songs.`)) return;
+    try {
+      await api.delete(`/api/setlists/${id}`);
+      navigate('/setlists', { replace: true });
+    } catch (err) {
+      setError(apiError(err, 'Could not delete setlist'));
+    }
+  };
+
   if (error) return <Text color="red.600">{error}</Text>;
   if (!setlist) return <Spinner />;
 
@@ -90,10 +155,16 @@ export default function SetlistView() {
             <Printer size={16} />
           </Button>
           {editable && (
-            <Button size="sm" colorPalette="blue" onClick={() => setAdding((v) => !v)}>
-              <Plus size={16} />
-              <Text ml={1}>Add song</Text>
-            </Button>
+            <>
+              <Button size="sm" variant="outline" onClick={() => (editing ? setEditing(false) : startEdit())}>
+                <Pencil size={16} />
+                <Text ml={1}>Edit</Text>
+              </Button>
+              <Button size="sm" colorPalette="blue" onClick={() => setAdding((v) => !v)}>
+                <Plus size={16} />
+                <Text ml={1}>Add song</Text>
+              </Button>
+            </>
           )}
         </HStack>
       </Flex>
@@ -103,7 +174,53 @@ export default function SetlistView() {
         {setlist.serviceDate && (
           <Text color="gray.600">{dayjs(setlist.serviceDate).format('dddd, D MMMM YYYY')}</Text>
         )}
+        {setlist.notes && (
+          <Text color="gray.600" fontSize="sm" mt={1} whiteSpace="pre-wrap">
+            {setlist.notes}
+          </Text>
+        )}
       </Box>
+
+      {editing && editable && (
+        <Box bg="white" p={4} borderRadius="lg" borderWidth="1px" className="no-print">
+          <Stack gap={3}>
+            <Flex gap={2} wrap="wrap">
+              <Input
+                placeholder="Setlist name"
+                value={editForm.name}
+                onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                maxW="sm"
+              />
+              <Input
+                type="date"
+                value={editForm.serviceDate}
+                onChange={(e) => setEditForm((f) => ({ ...f, serviceDate: e.target.value }))}
+                maxW="200px"
+              />
+            </Flex>
+            <Textarea
+              placeholder="Notes for the team…"
+              value={editForm.notes}
+              onChange={(e) => setEditForm((f) => ({ ...f, notes: e.target.value }))}
+              rows={2}
+            />
+            <Flex justify="space-between" wrap="wrap" gap={2}>
+              <Button size="sm" variant="outline" colorPalette="red" onClick={deleteSetlist}>
+                <Trash2 size={16} />
+                <Text ml={1}>Delete setlist</Text>
+              </Button>
+              <HStack gap={2}>
+                <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+                  Cancel
+                </Button>
+                <Button size="sm" colorPalette="blue" onClick={saveSetlist} loading={savingSetlist}>
+                  Save
+                </Button>
+              </HStack>
+            </Flex>
+          </Stack>
+        </Box>
+      )}
 
       {adding && (
         <Box bg="white" p={4} borderRadius="lg" borderWidth="1px" maxH="300px" overflowY="auto" className="no-print">
@@ -162,6 +279,17 @@ export default function SetlistView() {
                   </Box>
 
                   <HStack gap={2} className="no-print">
+                    {item.hasAudio && (
+                      <Button
+                        size="xs"
+                        variant={openPlayers[item.id] ? 'subtle' : 'outline'}
+                        colorPalette="blue"
+                        onClick={() => togglePlayer(item.id)}
+                      >
+                        <Music2 size={14} />
+                        <Text ml={1}>Play-along</Text>
+                      </Button>
+                    )}
                     {item.key ? (
                       <select
                         value={displayKey}
@@ -198,6 +326,18 @@ export default function SetlistView() {
                     )}
                   </HStack>
                 </Flex>
+
+                {item.hasAudio && openPlayers[item.id] && (
+                  <Box mt={3} pt={3} borderTopWidth="1px" className="no-print">
+                    <AudioPlayer
+                      key={item.id}
+                      songId={item.songId}
+                      canEdit={editable}
+                      tuneOverride={item.tuneOffset ?? item.audioTuneOffset}
+                      onSaveTune={editable ? saveTune(item) : undefined}
+                    />
+                  </Box>
+                )}
 
                 {item.content.trim() && (
                   <Box mt={4} pt={4} borderTopWidth="1px">

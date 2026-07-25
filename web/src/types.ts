@@ -25,6 +25,8 @@ export interface SongAudio {
   songId: string;
   filename: string;
   sizeBytes: number;
+  /** Saved playback pitch offset in semitones. 0 = original pitch. */
+  tuneOffset: number;
   createdAt: string;
   url: string;
   expiresIn: number;
@@ -63,6 +65,8 @@ export interface SetlistItem {
   songId: string;
   position: number;
   keyOverride: string | null;
+  /** Per-setlist tune override; null falls back to audioTuneOffset. */
+  tuneOffset: number | null;
   notes: string;
   title: string;
   artist: string;
@@ -71,4 +75,8 @@ export interface SetlistItem {
   tempo: number | null;
   feel: string;
   content: string;
+  /** Whether the song has a reference recording to play along with. */
+  hasAudio: boolean;
+  /** The recording's own saved tune — the fallback when tuneOffset is null. */
+  audioTuneOffset: number;
 }

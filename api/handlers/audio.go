@@ -158,7 +158,7 @@ func ConfirmAudio(database *sqlx.DB, store *storage.Client, cfg *config.Config) 
 				size_bytes   = EXCLUDED.size_bytes,
 				uploaded_by  = EXCLUDED.uploaded_by,
 				created_at   = NOW()
-			RETURNING id, song_id, storage_path, filename, size_bytes, uploaded_by, created_at`,
+			RETURNING id, song_id, storage_path, filename, size_bytes, tune_offset, uploaded_by, created_at`,
 			songID, storagePath, strings.TrimSpace(body.Filename), size, user.ID)
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Failed to save the track"})
@@ -174,7 +174,7 @@ func GetAudio(database *sqlx.DB, store *storage.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var audio models.SongAudio
 		err := database.Get(&audio, `
-			SELECT id, song_id, storage_path, filename, size_bytes, uploaded_by, created_at
+			SELECT id, song_id, storage_path, filename, size_bytes, tune_offset, uploaded_by, created_at
 			FROM song_audio WHERE song_id = $1`, c.Param("id"))
 		if errors.Is(err, sql.ErrNoRows) {
 			c.JSON(404, gin.H{"error": "No audio for this song"})
@@ -196,14 +196,50 @@ func GetAudio(database *sqlx.DB, store *storage.Client) gin.HandlerFunc {
 			return
 		}
 		c.JSON(200, gin.H{
-			"id":        audio.ID,
-			"songId":    audio.SongID,
-			"filename":  audio.Filename,
-			"sizeBytes": audio.SizeBytes,
-			"createdAt": audio.CreatedAt,
-			"url":       url,
-			"expiresIn": audioURLTTL,
+			"id":         audio.ID,
+			"songId":     audio.SongID,
+			"filename":   audio.Filename,
+			"sizeBytes":  audio.SizeBytes,
+			"tuneOffset": audio.TuneOffset,
+			"createdAt":  audio.CreatedAt,
+			"url":        url,
+			"expiresIn":  audioURLTTL,
 		})
+	}
+}
+
+// maxTuneShift bounds a saved pitch offset. Past an octave the shift is more
+// re-recording than reference, and the artefacts make it useless as a guide.
+const maxTuneShift = 12
+
+// UpdateAudioTune saves the reference track's pitch offset so every viewer,
+// and any setlist that doesn't override it, plays along at the same pitch.
+func UpdateAudioTune(database *sqlx.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var body struct {
+			TuneOffset int `json:"tuneOffset"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid request"})
+			return
+		}
+		if body.TuneOffset < -maxTuneShift || body.TuneOffset > maxTuneShift {
+			c.JSON(400, gin.H{"error": "Tune offset is out of range"})
+			return
+		}
+
+		res, err := database.Exec(
+			`UPDATE song_audio SET tune_offset = $1 WHERE song_id = $2`,
+			body.TuneOffset, c.Param("id"))
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to save the tune"})
+			return
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			c.JSON(404, gin.H{"error": "No audio for this song"})
+			return
+		}
+		c.JSON(200, gin.H{"ok": true, "tuneOffset": body.TuneOffset})
 	}
 }
 
