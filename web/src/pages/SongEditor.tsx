@@ -1,18 +1,20 @@
 import {
   Box, Button, Flex, Grid, HStack, Heading, Input, Spinner, Stack, Text, Textarea,
 } from '@chakra-ui/react';
-import { ArrowLeft, Trash2 } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import api, { apiError } from '@/lib/api';
 import { canEdit } from '@/lib/auth';
 import { KEYS } from '@/lib/chords';
-import { hasChords, transposeContent } from '@/lib/chordpro';
+import { hasChords, sectionNames, transposeContent } from '@/lib/chordpro';
+import { NOTE_COLORS, groupNotes, noteColor } from '@/lib/noteColors';
 import { useApp } from '@/contexts/AppContext';
 import AudioPlayer from '@/components/AudioPlayer';
 import AudioUpload from '@/components/AudioUpload';
 import ChordChart from '@/components/ChordChart';
-import type { Song } from '@/types';
+import { NoteCardList } from '@/components/NoteCardView';
+import type { NoteCard, Song } from '@/types';
 
 const TIME_SIGNATURES = ['4/4', '3/4', '6/8', '2/4', '12/8', '5/4', '7/8'];
 const FEELS = ['Straight', 'Swing', 'Shuffle', 'Ballad', 'Driving', 'Half-time', 'Waltz', 'Anthemic'];
@@ -47,10 +49,10 @@ export default function SongEditor() {
     tempo: '',
     feel: '',
     ccli: '',
-    notes: '',
     tags: '',
     content: '',
   });
+  const [noteCards, setNoteCards] = useState<NoteCard[]>([]);
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -72,6 +74,13 @@ export default function SongEditor() {
       .then(({ data }) => {
         setContentKey(data.key ?? '');
         setHasAudio(data.hasAudio);
+        setNoteCards(
+          data.noteCards?.length
+            ? data.noteCards
+            : data.notes
+              ? [{ color: 'amber', text: data.notes, section: '' }]
+              : [],
+        );
         setForm({
           title: data.title,
           artist: data.artist,
@@ -80,7 +89,6 @@ export default function SongEditor() {
           tempo: data.tempo?.toString() ?? '',
           feel: data.feel,
           ccli: data.ccli,
-          notes: data.notes,
           tags: data.tags.join(', '),
           content: data.content,
         });
@@ -135,6 +143,9 @@ export default function SongEditor() {
       key: form.key || null,
       tempo: form.tempo ? Number(form.tempo) : null,
       tags: form.tags.split(',').map((t) => t.trim()).filter(Boolean),
+      // The legacy single notes field is retired in favour of note cards.
+      notes: '',
+      noteCards: noteCards.filter((c) => c.text.trim()),
     };
 
     try {
@@ -168,6 +179,21 @@ export default function SongEditor() {
       setError(apiError(err, 'Could not delete song'));
     }
   };
+
+  const addCard = () => setNoteCards((cs) => [...cs, { color: 'amber', text: '', section: '' }]);
+  const patchCard = (i: number, patch: Partial<NoteCard>) =>
+    setNoteCards((cs) => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
+  const removeCard = (i: number) => setNoteCards((cs) => cs.filter((_, j) => j !== i));
+
+  // Anchor targets: the chart's sections, plus any section a card still points
+  // at even after it was renamed/removed, so that choice isn't silently lost.
+  const secs = sectionNames(form.content);
+  const known = new Set(secs.map((s) => s.toLowerCase()));
+  const orphaned = [
+    ...new Set(noteCards.map((c) => c.section).filter((s) => s && !known.has(s.toLowerCase()))),
+  ];
+  const sectionOptions = [...secs, ...orphaned];
+  const previewNotes = groupNotes(noteCards);
 
   if (loading) return <Spinner />;
 
@@ -274,12 +300,77 @@ export default function SongEditor() {
           </Field>
 
           <Field label="Notes">
-            <Textarea
-              value={form.notes}
-              onChange={(e) => set('notes')(e.target.value)}
-              placeholder="Arrangement notes, cues, who leads what…"
-              rows={3}
-            />
+            <Stack gap={2}>
+              {noteCards.map((card, i) => {
+                const c = noteColor(card.color);
+                return (
+                  <Box
+                    key={i}
+                    borderWidth="1px"
+                    borderRadius="md"
+                    borderLeftWidth="4px"
+                    borderColor={c.border}
+                    bg={c.bg}
+                    p={3}
+                  >
+                    <Flex gap={2} align="center" mb={2} wrap="wrap">
+                      <HStack gap={1}>
+                        {NOTE_COLORS.map((nc) => (
+                          <Box
+                            as="button"
+                            key={nc.key}
+                            onClick={() => patchCard(i, { color: nc.key })}
+                            w="20px"
+                            h="20px"
+                            borderRadius="full"
+                            bg={nc.swatch}
+                            cursor="pointer"
+                            borderWidth={card.color === nc.key ? '2px' : '1px'}
+                            borderColor={card.color === nc.key ? 'gray.800' : 'blackAlpha.300'}
+                            title={nc.label}
+                            aria-label={nc.label}
+                          />
+                        ))}
+                      </HStack>
+                      <Box flex="1" />
+                      <select
+                        value={card.section}
+                        onChange={(e) => patchCard(i, { section: e.target.value })}
+                        title="Where this note appears"
+                        style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #CBD5E0', maxWidth: 170 }}
+                      >
+                        <option value="">General (top)</option>
+                        {sectionOptions.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        colorPalette="red"
+                        onClick={() => removeCard(i)}
+                        aria-label="Remove note"
+                      >
+                        <Trash2 size={14} />
+                      </Button>
+                    </Flex>
+                    <Textarea
+                      value={card.text}
+                      onChange={(e) => patchCard(i, { text: e.target.value })}
+                      placeholder="Arrangement note, cue, caution…"
+                      rows={2}
+                      bg="white"
+                    />
+                  </Box>
+                );
+              })}
+              <Button size="sm" variant="outline" alignSelf="start" onClick={addCard}>
+                <Plus size={14} />
+                <Text ml={1}>Add note</Text>
+              </Button>
+            </Stack>
           </Field>
         </Stack>
       </Box>
@@ -354,8 +445,18 @@ export default function SongEditor() {
           <Text fontWeight="medium" mb={3}>
             Preview
           </Text>
-          {form.content.trim() ? (
-            <ChordChart content={form.content} fromKey={form.key} toKey={form.key} />
+          {form.content.trim() || noteCards.length ? (
+            <>
+              <NoteCardList cards={previewNotes.general} />
+              <Box mt={previewNotes.general.length ? 3 : 0}>
+                <ChordChart
+                  content={form.content}
+                  fromKey={form.key}
+                  toKey={form.key}
+                  sectionNotes={previewNotes.bySection}
+                />
+              </Box>
+            </>
           ) : (
             <Text color="gray.500" fontSize="sm">
               Your chart appears here as you type.

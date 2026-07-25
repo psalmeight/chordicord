@@ -35,6 +35,9 @@ CREATE TABLE IF NOT EXISTS "songs" (
 	"feel" varchar(64) NOT NULL DEFAULT '',
 	"ccli" varchar(32) NOT NULL DEFAULT '',
 	"notes" text NOT NULL DEFAULT '',
+	-- Colour-coded note cards: [{color, text, section}]. section "" is a general
+	-- note pinned to the top; otherwise it anchors to that chart section.
+	"note_cards" jsonb NOT NULL DEFAULT '[]'::jsonb,
 	"tags" text[] NOT NULL DEFAULT '{}',
 	-- ChordPro-style body: "[G]Amazing [C]grace" with {section} directives.
 	"content" text NOT NULL DEFAULT '',

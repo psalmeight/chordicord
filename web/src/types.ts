@@ -1,3 +1,11 @@
+/** A colored note callout. `section` anchors it to a chart section; '' pins it
+ *  to the top of the song as a general note. */
+export interface NoteCard {
+  color: string;
+  text: string;
+  section: string;
+}
+
 export interface Song {
   id: string;
   title: string;
@@ -9,6 +17,7 @@ export interface Song {
   feel: string;
   ccli: string;
   notes: string;
+  noteCards: NoteCard[];
   tags: string[];
   content: string;
   createdBy: string | null;

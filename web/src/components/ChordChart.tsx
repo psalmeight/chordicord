@@ -1,6 +1,9 @@
 import { Box, Text } from '@chakra-ui/react';
 import { useMemo } from 'react';
 import { parseSong, transposeSong, type Line } from '@/lib/chordpro';
+import { sectionKey } from '@/lib/noteColors';
+import { NoteCardList } from '@/components/NoteCardView';
+import type { NoteCard } from '@/types';
 
 interface Props {
   content: string;
@@ -10,6 +13,9 @@ interface Props {
   toKey: string;
   fontSize?: number;
   showChords?: boolean;
+  /** Note cards keyed by section (via sectionKey). Rendered under the first
+   *  occurrence of the matching section header. */
+  sectionNotes?: Record<string, NoteCard[]>;
 }
 
 /**
@@ -20,17 +26,35 @@ interface Props {
  * F#m7). Column-per-syllable is what keeps alignment correct across wrapping,
  * which a whitespace-padded monospace approach can't do.
  */
-export default function ChordChart({ content, fromKey, toKey, fontSize = 15, showChords = true }: Props) {
+export default function ChordChart({
+  content, fromKey, toKey, fontSize = 15, showChords = true, sectionNotes,
+}: Props) {
   const song = useMemo(
     () => transposeSong(parseSong(content), fromKey, toKey),
     [content, fromKey, toKey],
   );
 
+  // A section's notes render under its first appearance only, so a chart that
+  // repeats "{Chorus}" doesn't stamp the same note three times.
+  const shown = new Set<string>();
+
   return (
     <Box className="chart" fontSize={`${fontSize}px`} lineHeight="1.35">
-      {song.lines.map((line, i) => (
-        <ChartLine key={i} line={line} showChords={showChords} />
-      ))}
+      {song.lines.map((line, i) => {
+        const out = [<ChartLine key={i} line={line} showChords={showChords} />];
+        if (line.type === 'section' && sectionNotes) {
+          const k = sectionKey(line.name);
+          if (!shown.has(k) && sectionNotes[k]?.length) {
+            shown.add(k);
+            out.push(
+              <Box key={`notes-${i}`} my={2}>
+                <NoteCardList cards={sectionNotes[k]} />
+              </Box>,
+            );
+          }
+        }
+        return out;
+      })}
     </Box>
   );
 }

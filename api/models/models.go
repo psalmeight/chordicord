@@ -1,10 +1,56 @@
 package models
 
 import (
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/lib/pq"
 )
+
+// NoteCard is one colored callout on a song — a coloured sticky note.
+// Section anchors it to a named section of the chart ({Chorus} etc); "" pins
+// it to the top of the song as a general note.
+type NoteCard struct {
+	Color   string `json:"color"`
+	Text    string `json:"text"`
+	Section string `json:"section"`
+}
+
+// NoteCards is stored as a jsonb array so a song can carry several colour-coded
+// notes (a red caution and a green cue side by side) without a second table.
+type NoteCards []NoteCard
+
+func (n NoteCards) Value() (driver.Value, error) {
+	if n == nil {
+		return "[]", nil
+	}
+	b, err := json.Marshal(n)
+	return string(b), err
+}
+
+func (n *NoteCards) Scan(src any) error {
+	switch v := src.(type) {
+	case nil:
+		*n = NoteCards{}
+	case []byte:
+		if len(v) == 0 {
+			*n = NoteCards{}
+			return nil
+		}
+		return json.Unmarshal(v, n)
+	case string:
+		if v == "" {
+			*n = NoteCards{}
+			return nil
+		}
+		return json.Unmarshal([]byte(v), n)
+	default:
+		return fmt.Errorf("NoteCards: cannot scan %T", src)
+	}
+	return nil
+}
 
 type User struct {
 	ID           string     `db:"id" json:"id"`
@@ -28,6 +74,7 @@ type Song struct {
 	Feel          string         `db:"feel" json:"feel"`
 	CCLI          string         `db:"ccli" json:"ccli"`
 	Notes         string         `db:"notes" json:"notes"`
+	NoteCards     NoteCards      `db:"note_cards" json:"noteCards"`
 	Tags          pq.StringArray `db:"tags" json:"tags"`
 	Content       string         `db:"content" json:"content"`
 	CreatedBy     *string        `db:"created_by" json:"createdBy"`

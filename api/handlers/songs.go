@@ -15,23 +15,24 @@ import (
 
 const songSelect = `
 	SELECT s.id, s.title, s.artist, s.song_key, s.time_signature, s.tempo, s.feel,
-	       s.ccli, s.notes, s.tags, s.content, s.created_by, s.updated_by,
+	       s.ccli, s.notes, s.note_cards, s.tags, s.content, s.created_by, s.updated_by,
 	       s.created_at, s.updated_at, u.name AS updated_by_name,
 	       EXISTS(SELECT 1 FROM song_audio a WHERE a.song_id = s.id) AS has_audio
 	FROM songs s
 	LEFT JOIN users u ON u.id = s.updated_by`
 
 type songBody struct {
-	Title         *string   `json:"title"`
-	Artist        *string   `json:"artist"`
-	Key           *string   `json:"key"`
-	TimeSignature *string   `json:"timeSignature"`
-	Tempo         *int      `json:"tempo"`
-	Feel          *string   `json:"feel"`
-	CCLI          *string   `json:"ccli"`
-	Notes         *string   `json:"notes"`
-	Tags          *[]string `json:"tags"`
-	Content       *string   `json:"content"`
+	Title         *string           `json:"title"`
+	Artist        *string           `json:"artist"`
+	Key           *string           `json:"key"`
+	TimeSignature *string           `json:"timeSignature"`
+	Tempo         *int              `json:"tempo"`
+	Feel          *string           `json:"feel"`
+	CCLI          *string           `json:"ccli"`
+	Notes         *string           `json:"notes"`
+	NoteCards     *models.NoteCards `json:"noteCards"`
+	Tags          *[]string         `json:"tags"`
+	Content       *string           `json:"content"`
 }
 
 func ListSongs(database *sqlx.DB) gin.HandlerFunc {
@@ -43,7 +44,7 @@ func ListSongs(database *sqlx.DB) gin.HandlerFunc {
 		// are large and the index only renders metadata.
 		query := `
 			SELECT s.id, s.title, s.artist, s.song_key, s.time_signature, s.tempo, s.feel,
-			       s.ccli, s.notes, s.tags, '' AS content, s.created_by, s.updated_by,
+			       s.ccli, s.notes, s.note_cards, s.tags, '' AS content, s.created_by, s.updated_by,
 			       s.created_at, s.updated_at, u.name AS updated_by_name,
 			       EXISTS(SELECT 1 FROM song_audio a WHERE a.song_id = s.id) AS has_audio
 			FROM songs s
@@ -85,15 +86,19 @@ func CreateSong(database *sqlx.DB) gin.HandlerFunc {
 		if body.Tags != nil {
 			tags = pq.StringArray(*body.Tags)
 		}
+		var noteCards interface{}
+		if body.NoteCards != nil {
+			noteCards = *body.NoteCards
+		}
 
 		var id string
 		err := database.QueryRowx(`
-			INSERT INTO songs (title, artist, song_key, time_signature, tempo, feel, ccli, notes, tags, content, created_by, updated_by)
+			INSERT INTO songs (title, artist, song_key, time_signature, tempo, feel, ccli, notes, note_cards, tags, content, created_by, updated_by)
 			VALUES ($1, COALESCE($2,''), $3, COALESCE($4,'4/4'), $5, COALESCE($6,''),
-			        COALESCE($7,''), COALESCE($8,''), $9, COALESCE($10,''), $11, $11)
+			        COALESCE($7,''), COALESCE($8,''), COALESCE($9::jsonb,'[]'::jsonb), $10, COALESCE($11,''), $12, $12)
 			RETURNING id`,
 			strings.TrimSpace(*body.Title), body.Artist, body.Key, body.TimeSignature, body.Tempo,
-			body.Feel, body.CCLI, body.Notes, tags, body.Content, user.ID).Scan(&id)
+			body.Feel, body.CCLI, body.Notes, noteCards, tags, body.Content, user.ID).Scan(&id)
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Failed to create song"})
 			return
@@ -125,6 +130,10 @@ func UpdateSong(database *sqlx.DB) gin.HandlerFunc {
 		if body.Tags != nil {
 			tags = pq.StringArray(*body.Tags)
 		}
+		var noteCards interface{}
+		if body.NoteCards != nil {
+			noteCards = *body.NoteCards
+		}
 		// Tempo is nullable, so COALESCE can't distinguish "omitted" from
 		// "cleared". A separate flag makes the intent explicit.
 		clearTempo := body.Tempo == nil && c.Request.URL.Query().Get("clearTempo") == "1"
@@ -144,6 +153,7 @@ func UpdateSong(database *sqlx.DB) gin.HandlerFunc {
 					feel           = COALESCE($7, feel),
 					ccli           = COALESCE($8, ccli),
 					notes          = COALESCE($9, notes),
+					note_cards     = COALESCE($15::jsonb, note_cards),
 					tags           = COALESCE($10, tags),
 					content        = COALESCE($11, content),
 					updated_by     = $12,
@@ -152,12 +162,12 @@ func UpdateSong(database *sqlx.DB) gin.HandlerFunc {
 				RETURNING *
 			)
 			SELECT s.id, s.title, s.artist, s.song_key, s.time_signature, s.tempo, s.feel,
-			       s.ccli, s.notes, s.tags, s.content, s.created_by, s.updated_by,
+			       s.ccli, s.notes, s.note_cards, s.tags, s.content, s.created_by, s.updated_by,
 			       s.created_at, s.updated_at, u.name AS updated_by_name,
 			       EXISTS(SELECT 1 FROM song_audio a WHERE a.song_id = s.id) AS has_audio
 			FROM updated s LEFT JOIN users u ON u.id = s.updated_by`,
 			body.Title, body.Artist, body.Key, body.TimeSignature, clearTempo, body.Tempo,
-			body.Feel, body.CCLI, body.Notes, tags, body.Content, user.ID, id, clearKey)
+			body.Feel, body.CCLI, body.Notes, tags, body.Content, user.ID, id, clearKey, noteCards)
 		if err != nil {
 			c.JSON(404, gin.H{"error": "Song not found"})
 			return

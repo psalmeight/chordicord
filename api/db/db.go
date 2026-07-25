@@ -123,6 +123,16 @@ func Migrate(database *sqlx.DB) {
 		// Per-setlist override of that tune. NULL means "use the recording's
 		// saved tune", mirroring how key_override falls back to the song key.
 		`ALTER TABLE setlist_items ADD COLUMN IF NOT EXISTS tune_offset smallint;`,
+
+		// Colour-coded note cards, each optionally anchored to a chart section.
+		`ALTER TABLE songs ADD COLUMN IF NOT EXISTS note_cards jsonb NOT NULL DEFAULT '[]'::jsonb;`,
+		// Migrate the old single free-text note into one general amber card, then
+		// blank it so this backfill is a one-shot (the WHERE stops matching once
+		// note_cards is populated and notes is cleared).
+		`UPDATE songs
+		    SET note_cards = jsonb_build_array(jsonb_build_object('color', 'amber', 'text', notes, 'section', '')),
+		        notes = ''
+		  WHERE note_cards = '[]'::jsonb AND btrim(notes) <> '';`,
 	}
 
 	for _, s := range stmts {

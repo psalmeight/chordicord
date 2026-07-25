@@ -137,6 +137,23 @@ export function transposeSong(song: ParsedSong, fromKey: string, toKey: string):
   };
 }
 
+/** Distinct section names in the chart, in first-appearance order. Used to
+ *  offer note-card anchor targets. */
+export function sectionNames(content: string): string[] {
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const line of parseSong(content).lines) {
+    if (line.type === 'section') {
+      const key = line.name.trim().toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        names.push(line.name);
+      }
+    }
+  }
+  return names;
+}
+
 /** Every distinct chord in the song, in first-appearance order. */
 export function uniqueChords(song: ParsedSong): string[] {
   const seen = new Set<string>();

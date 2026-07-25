@@ -13,7 +13,9 @@ import AudioPlayer from '@/components/AudioPlayer';
 import AudioUpload from '@/components/AudioUpload';
 import ChordChart from '@/components/ChordChart';
 import KeySelector from '@/components/KeySelector';
-import type { Song } from '@/types';
+import { NoteCardList } from '@/components/NoteCardView';
+import { groupNotes } from '@/lib/noteColors';
+import type { NoteCard, Song } from '@/types';
 
 export default function SongView() {
   const { id } = useParams();
@@ -53,6 +55,16 @@ export default function SongView() {
   // With a capo on, the chart shows the shapes being fingered, not the
   // sounding key — that's what a guitarist needs to read.
   const chartKey = capo ? capoKey(displayKey, capo) : displayKey;
+
+  // Note cards: a general list at the top and the rest anchored to sections.
+  // Falls back to the legacy single notes field for any song not yet migrated.
+  const cards: NoteCard[] =
+    song.noteCards?.length
+      ? song.noteCards
+      : song.notes
+        ? [{ color: 'amber', text: song.notes, section: '' }]
+        : [];
+  const notes = groupNotes(cards);
 
   // The reference track carries its own pitch control and is not driven from
   // here: the key describes the chart, which the recording may not match.
@@ -107,13 +119,7 @@ export default function SongView() {
           </HStack>
         )}
 
-        {song.notes && (
-          <Box mt={4} p={3} bg="yellow.50" borderRadius="md" borderLeftWidth="3px" borderColor="yellow.400">
-            <Text fontSize="sm" whiteSpace="pre-wrap">
-              {song.notes}
-            </Text>
-          </Box>
-        )}
+        <NoteCardList cards={notes.general} mt={4} />
       </Box>
 
       {/* Transpose controls */}
@@ -244,6 +250,7 @@ export default function SongView() {
             toKey={hasKey ? chartKey : ''}
             fontSize={fontSize}
             showChords={showChords}
+            sectionNotes={notes.bySection}
           />
         ) : (
           <Text color="gray.500">No lyrics or chords yet.</Text>
