@@ -3,6 +3,7 @@ import { ListMusic, LogOut, Music, Users as UsersIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useApp } from '@/contexts/AppContext';
+import { MetronomeProvider } from '@/contexts/MetronomeContext';
 import { FONTS } from '@/lib/fonts';
 
 export default function Layout({ children }: { children: ReactNode }) {
@@ -21,6 +22,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   );
 
   return (
+    <MetronomeProvider>
     <Box minH="100vh" bg="gray.50">
       <Box as="header" bg="white" borderBottomWidth="1px" className="no-print">
         <Container maxW="6xl" py={3}>
@@ -72,5 +74,6 @@ export default function Layout({ children }: { children: ReactNode }) {
         {children}
       </Container>
     </Box>
+    </MetronomeProvider>
   );
 }

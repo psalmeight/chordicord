@@ -1,13 +1,14 @@
 import {
   Badge, Box, Button, Flex, HStack, Heading, Spinner, Stack, Text,
 } from '@chakra-ui/react';
-import { ArrowLeft, Minus, Pencil, Plus, Printer } from 'lucide-react';
+import { ArrowLeft, Gauge, Minus, Pencil, Plus, Printer } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import api, { apiError } from '@/lib/api';
 import { canEdit } from '@/lib/auth';
 import { capoKey } from '@/lib/chords';
 import { useApp } from '@/contexts/AppContext';
+import { useMetronome } from '@/contexts/MetronomeContext';
 import AudioPlayer from '@/components/AudioPlayer';
 import AudioUpload from '@/components/AudioUpload';
 import ChordChart from '@/components/ChordChart';
@@ -17,6 +18,7 @@ import type { Song } from '@/types';
 export default function SongView() {
   const { id } = useParams();
   const { user } = useApp();
+  const { playAt } = useMetronome();
   const [song, setSong] = useState<Song | null>(null);
   const [error, setError] = useState('');
 
@@ -161,6 +163,18 @@ export default function SongView() {
           <Button size="sm" variant={showChords ? 'subtle' : 'outline'} onClick={() => setShowChords((v) => !v)}>
             {showChords ? 'Hide chords' : 'Show chords'}
           </Button>
+
+          {song.tempo && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => playAt(song.tempo!, Number(song.timeSignature.split('/')[0]) || undefined)}
+              title="Start the metronome at this song's tempo"
+            >
+              <Gauge size={14} />
+              <Text ml={1}>Metronome {song.tempo}</Text>
+            </Button>
+          )}
         </Flex>
 
         {hasKey && capo > 0 && (
