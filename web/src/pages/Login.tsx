@@ -37,7 +37,7 @@ export default function Login() {
     <Center minH="100vh" bg="gray.50">
       <Box bg="white" p={8} borderRadius="lg" borderWidth="1px" w="full" maxW="sm">
         <Heading size="lg" mb={1}>
-          Transcode
+          FCF Chords
         </Heading>
         <Text color="gray.600" fontSize="sm" mb={6}>
           Sign in to your team's songbook.

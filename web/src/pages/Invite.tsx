@@ -41,7 +41,7 @@ export default function Invite() {
     <Center minH="100vh" bg="gray.50">
       <Box bg="white" p={8} borderRadius="lg" borderWidth="1px" w="full" maxW="sm">
         <Heading size="lg" mb={1}>
-          Welcome to Transcode
+          Welcome to FCF Chords
         </Heading>
         <Text color="gray.600" fontSize="sm" mb={6}>
           Choose a password to finish setting up your account.
