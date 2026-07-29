@@ -7,7 +7,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import api, { apiError } from '@/lib/api';
 import { canEdit } from '@/lib/auth';
 import { KEYS } from '@/lib/chords';
-import { hasChords, sectionNames, transposeContent } from '@/lib/chordpro';
+import { hasChords, hasInlineChords, sectionNames, toAligned, transposeContent } from '@/lib/chordpro';
 import { NOTE_COLORS, groupNotes, noteColor } from '@/lib/noteColors';
 import { useApp } from '@/contexts/AppContext';
 import AudioPlayer from '@/components/AudioPlayer';
@@ -20,12 +20,15 @@ const TIME_SIGNATURES = ['4/4', '3/4', '6/8', '2/4', '12/8', '5/4', '7/8'];
 const FEELS = ['Straight', 'Swing', 'Shuffle', 'Ballad', 'Driving', 'Half-time', 'Waltz', 'Anthemic'];
 
 const PLACEHOLDER = `{Verse 1}
-[G]Amazing grace how [C]sweet the [G]sound
-That [G]saved a wretch like [D]me
+G                  C         G
+Amazing grace how sweet the sound
+     G                    D
+That saved a wretch like me
 
 {Chorus}
-| G | C | G | D |
-[G]I once was [C]lost but [G]now am found`;
+| G | C | G | D |    *2x*
+G            C         G
+I once was lost but now am found *build*`;
 
 export default function SongEditor() {
   const { id } = useParams();
@@ -66,6 +69,9 @@ export default function SongEditor() {
   const [undo, setUndo] = useState<{ content: string; key: string } | null>(null);
   // Which target key the offer was waved off for, so it stops nagging.
   const [dismissed, setDismissed] = useState('');
+  // Content as it was before chords were lifted above the lyrics, so a
+  // conversion that lands badly can be taken back before it's saved.
+  const [preAlign, setPreAlign] = useState<string | null>(null);
 
   useEffect(() => {
     if (isNew) return;
@@ -128,6 +134,17 @@ export default function SongEditor() {
     setForm((prev) => ({ ...prev, content: undo.content }));
     setContentKey(undo.key);
     setUndo(null);
+  };
+
+  const alignChords = () => {
+    setPreAlign(form.content);
+    setForm((prev) => ({ ...prev, content: toAligned(prev.content) }));
+  };
+
+  const undoAlign = () => {
+    if (preAlign === null) return;
+    setForm((prev) => ({ ...prev, content: preAlign }));
+    setPreAlign(null);
   };
 
   const save = async () => {
@@ -414,12 +431,27 @@ export default function SongEditor() {
 
       <Grid templateColumns={{ base: '1fr', lg: '1fr 1fr' }} gap={4}>
         <Box bg="white" p={5} borderRadius="lg" borderWidth="1px">
-          <Text fontWeight="medium" mb={1}>
-            Lyrics &amp; chords
-          </Text>
+          <Flex justify="space-between" align="center" gap={2} mb={1} wrap="wrap">
+            <Text fontWeight="medium">Lyrics &amp; chords</Text>
+            <HStack gap={2}>
+              {preAlign !== null && (
+                <Button size="xs" variant="ghost" onClick={undoAlign}>
+                  Undo
+                </Button>
+              )}
+              {hasInlineChords(form.content) && (
+                <Button size="xs" variant="outline" onClick={alignChords}>
+                  Move chords above the lyrics
+                </Button>
+              )}
+            </HStack>
+          </Flex>
           <Text fontSize="xs" color="gray.600" mb={3}>
-            Put chords in square brackets right before the syllable they land on:{' '}
-            <code>[G]Amazing</code>. Mark sections with <code>{'{Verse 1}'}</code>.{' '}
+            Write chords on their own line above the lyric — each one lands on whatever it sits
+            over. Inline <code>[G]Amazing</code> still works, and the two can be mixed. Mark
+            sections with <code>{'{Verse 1}'}</code>, and wrap a cue in asterisks —{' '}
+            <code>*hold*</code> — to show it in red anywhere on a chord row, in a lyric, or on a
+            line of its own.{' '}
             {form.key ? (
               <>
                 Write in the key of <strong>{form.key}</strong> — everyone can transpose from there.
@@ -432,8 +464,9 @@ export default function SongEditor() {
             )}
           </Text>
           <Textarea
-            className="chart"
+            className="chart-source"
             value={form.content}
+            spellCheck={false}
             onChange={(e) => set('content')(e.target.value)}
             placeholder={PLACEHOLDER}
             rows={22}

@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { capoKey, parseChord, signedSemitones, transposeChord, transposeChordToKey } from './chords';
-import { hasChords, parseSong, toChordPro, transposeContent, transposeSong } from './chordpro';
+import {
+  hasChords, hasInlineChords, lyricRuns, parseSong, toAligned, toChordPro, transposeContent,
+  transposeSong,
+} from './chordpro';
+
+/** A chord row of plain chords, the shape parseSong produces. */
+const row = (...names: string[]) => ({
+  type: 'chords',
+  chords: names.map((text) => ({ text, note: false })),
+});
 
 describe('parseChord', () => {
   it('parses roots, suffixes and slash basses', () => {
@@ -94,10 +103,242 @@ describe('parseSong', () => {
   });
 
   it('recognises chord-only lines', () => {
-    expect(parseSong('| G | Em7 | C |').lines[0]).toEqual({
-      type: 'chords',
-      chords: ['G', 'Em7', 'C'],
+    expect(parseSong('| G | Em7 | C |').lines[0]).toEqual(row('G', 'Em7', 'C'));
+  });
+});
+
+describe('parseSong with chords written above the lyric', () => {
+  /** The two spellings of the same chart, plus its inline equivalent. */
+  const bare = ['      G          C', 'Amazing grace how sweet'].join('\n');
+  const bracketed = ['      [G]        [C]', 'Amazing grace how sweet'].join('\n');
+  const inline = '[G]Amazing grace [C]how sweet';
+
+  it('anchors each chord to the column it sits over', () => {
+    //         col 6 ─┘          └─ col 17
+    expect(parseSong(bare).lines).toEqual([
+      {
+        type: 'lyrics',
+        pairs: [
+          { chord: '', lyric: 'Amazin' },
+          { chord: 'G', lyric: 'g grace how' },
+          { chord: 'C', lyric: ' sweet' },
+        ],
+      },
+    ]);
+  });
+
+  it('reads the bracketed spelling identically to the bare one', () => {
+    expect(parseSong(bracketed).lines).toEqual(parseSong(bare).lines);
+  });
+
+  it('produces the same pairs the inline form would', () => {
+    // "how" begins at column 14, which is where [C] sits in the inline form.
+    const aligned = ['G             C', 'Amazing grace how sweet'].join('\n');
+    expect(parseSong(aligned).lines).toEqual(parseSong(inline).lines);
+  });
+
+  it('keeps a bar chart standalone rather than eating the lyric under it', () => {
+    const song = parseSong(['| G | C |', 'Amazing grace'].join('\n'));
+    expect(song.lines).toEqual([
+      row('G', 'C'),
+      { type: 'lyrics', pairs: [{ chord: '', lyric: 'Amazing grace' }] },
+    ]);
+  });
+
+  it('does not mistake a title line for chords over the lyric', () => {
+    // "Amazing Grace" is two words that happen to start with note letters.
+    const song = parseSong(['Amazing Grace', 'how sweet the sound'].join('\n'));
+    expect(song.lines).toEqual([
+      { type: 'lyrics', pairs: [{ chord: '', lyric: 'Amazing Grace' }] },
+      { type: 'lyrics', pairs: [{ chord: '', lyric: 'how sweet the sound' }] },
+    ]);
+  });
+
+  it('leaves a chord line alone when the next line is not a lyric', () => {
+    expect(parseSong(['G  C', '', 'Amazing'].join('\n')).lines[0]).toEqual(row('G', 'C'));
+    expect(parseSong(['G  C', '{Verse 1}'].join('\n')).lines[0]).toEqual(row('G', 'C'));
+  });
+
+  it('will not stack a chord line onto a lyric that already has inline chords', () => {
+    const song = parseSong(['G  C', '[D]Amazing grace'].join('\n'));
+    expect(song.lines[0]).toEqual(row('G', 'C'));
+    expect(song.lines[1]).toEqual({ type: 'lyrics', pairs: [{ chord: 'D', lyric: 'Amazing grace' }] });
+  });
+
+  it('keeps a chord hanging past the end of the lyric', () => {
+    const song = parseSong(['C        G', 'Amazing'].join('\n'));
+    expect(song.lines[0]).toEqual({
+      type: 'lyrics',
+      pairs: [
+        { chord: 'C', lyric: 'Amazing' },
+        { chord: 'G', lyric: '' },
+      ],
     });
+  });
+
+  it('lets a chart mix both notations', () => {
+    const song = parseSong(['     C', 'Amazing grace', '[G]how sweet'].join('\n'));
+    expect(song.lines).toEqual([
+      {
+        type: 'lyrics',
+        pairs: [
+          { chord: '', lyric: 'Amazi' },
+          { chord: 'C', lyric: 'ng grace' },
+        ],
+      },
+      { type: 'lyrics', pairs: [{ chord: 'G', lyric: 'how sweet' }] },
+    ]);
+  });
+
+  it('counts anchored chords for hasChords', () => {
+    expect(hasChords(bare)).toBe(true);
+    expect(hasChords(bracketed)).toBe(true);
+  });
+});
+
+describe('notes written *like this*', () => {
+  const runsOf = (src: string) => {
+    const line = parseSong(src).lines[0];
+    if (line.type !== 'lyrics') throw new Error('expected a lyric line');
+    return lyricRuns(line.pairs).flat();
+  };
+
+  it('marks a note inside a lyric and drops the asterisks', () => {
+    expect(runsOf('Amazing *softly* grace')).toEqual([
+      { text: 'Amazing ', note: false },
+      { text: 'softly', note: true },
+      { text: ' grace', note: false },
+    ]);
+  });
+
+  it('closes a note that straddles a chord', () => {
+    expect(runsOf('[G]hold *this [C]whole* bar')).toEqual([
+      { text: 'hold ', note: false },
+      { text: 'this ', note: true },
+      { text: 'whole', note: true },
+      { text: ' bar', note: false },
+    ]);
+  });
+
+  it('leaves a lone asterisk as ordinary text', () => {
+    expect(runsOf('a * b')).toEqual([{ text: 'a * b', note: false }]);
+  });
+
+  it('sits on a chord row without stopping it being one', () => {
+    const song = parseSong(['G      *hold*      C', 'Amazing grace how sweet'].join('\n'));
+    expect(song.lines[0]).toEqual({
+      type: 'lyrics',
+      pairs: [
+        { chord: 'G', lyric: 'Amazing' },
+        { chord: 'hold', lyric: ' grace how s', note: true },
+        { chord: 'C', lyric: 'weet' },
+      ],
+    });
+  });
+
+  it('anchors a row of nothing but notes to the lyric below it', () => {
+    const song = parseSong(['     *softly*', 'Amazing grace'].join('\n'));
+    expect(song.lines[0]).toEqual({
+      type: 'lyrics',
+      pairs: [
+        { chord: '', lyric: 'Amazi' },
+        { chord: 'softly', lyric: 'ng grace', note: true },
+      ],
+    });
+  });
+
+  it('stands on its own line when no lyric follows', () => {
+    expect(parseSong(['*Repeat 2x*', '', '{Chorus}'].join('\n')).lines[0]).toEqual({
+      type: 'chords',
+      chords: [{ text: 'Repeat 2x', note: true }],
+    });
+  });
+
+  it('rides along on a bar chart', () => {
+    expect(parseSong('| G | C |  *2x*').lines[0]).toEqual({
+      type: 'chords',
+      chords: [
+        { text: 'G', note: false },
+        { text: 'C', note: false },
+        { text: '2x', note: true },
+      ],
+    });
+  });
+
+  it('is not counted as a chord', () => {
+    expect(hasChords('*Repeat 2x*')).toBe(false);
+    expect(hasChords(['*softly*', 'Amazing grace'].join('\n'))).toBe(false);
+    expect(hasChords(['G  *softly*', 'Amazing grace'].join('\n'))).toBe(true);
+  });
+
+  it('is never transposed, even when it reads like a chord', () => {
+    expect(transposeContent(['G  *capo 2, A shapes*', 'Amazing grace'].join('\n'), 'G', 'Bb')).toBe(
+      ['Bb *capo 2, A shapes*', 'Amazing grace'].join('\n'),
+    );
+    expect(transposeContent('| G | C |  *hold the D*', 'G', 'Bb')).toBe('| Bb | Eb |  *hold the D*');
+    expect(transposeContent('[G]Amazing *stay on G* grace', 'G', 'Bb')).toBe(
+      '[Bb]Amazing *stay on G* grace',
+    );
+  });
+
+  it('holds its column when a chord beside it is transposed', () => {
+    const src = ['G     *hold*     C', 'Amazing grace how sweet'].join('\n');
+    expect(transposeContent(src, 'G', 'Bb').split('\n')[0]).toBe('Bb    *hold*     Eb');
+  });
+
+  it('survives a round trip through toChordPro', () => {
+    const song = parseSong(['G      *hold*', 'Amazing grace'].join('\n'));
+    expect(parseSong(toChordPro(song)).lines).toEqual(song.lines);
+  });
+});
+
+describe('toAligned', () => {
+  it('lifts inline chords onto their own line at the right columns', () => {
+    expect(toAligned('[G]Amazing grace [C]how sweet')).toBe(
+      ['G             C', 'Amazing grace how sweet'].join('\n'),
+    );
+  });
+
+  it('indents past lyrics that come before the first chord', () => {
+    expect(toAligned('How [G]sweet')).toBe(['    G', 'How sweet'].join('\n'));
+  });
+
+  it('leaves bar charts, headers, comments and plain lyrics untouched', () => {
+    const src = ['# Capo 2', '{Verse 1}', '| G | C |', 'Amazing grace'].join('\n');
+    expect(toAligned(src)).toBe(src);
+  });
+
+  it('round-trips: the aligned chart parses to the pairs it came from', () => {
+    const src = '[Am7]Once was [D/F#]lost but [G]now am found';
+    expect(parseSong(toAligned(src)).lines).toEqual(parseSong(src).lines);
+  });
+
+  it('nudges right rather than overlapping when a chord outgrows its slot', () => {
+    // "Cmaj7#11" is wider than the syllable under it, so "D" cannot start at
+    // its own column — one space is the most it can give up.
+    expect(toAligned('[Cmaj7#11]Oh [D]no')).toBe(['Cmaj7#11 D', 'Oh no'].join('\n'));
+  });
+
+  it('falls back to brackets when a bare row would not read back as chords', () => {
+    // N.C. is not a chord parseChord accepts, so a bare row would be read as
+    // a lyric on the way back in.
+    const out = toAligned('[N.C.]Silent [G]night');
+    expect(out).toBe(['[N.C.] [G]', 'Silent night'].join('\n'));
+    expect(parseSong(out).lines).toEqual(parseSong('[N.C.]Silent [G]night').lines);
+  });
+
+  it('is idempotent', () => {
+    const once = toAligned('[G]Amazing grace [C]how sweet');
+    expect(toAligned(once)).toBe(once);
+  });
+});
+
+describe('hasInlineChords', () => {
+  it('spots charts that still have something to convert', () => {
+    expect(hasInlineChords('[G]Amazing grace')).toBe(true);
+    expect(hasInlineChords(['G', 'Amazing grace'].join('\n'))).toBe(false);
+    expect(hasInlineChords('| G | C |')).toBe(false);
+    expect(hasInlineChords('Amazing grace')).toBe(false);
   });
 });
 
@@ -169,6 +410,32 @@ describe('transposeContent', () => {
 
   it('transposes slash-chord basses with the root', () => {
     expect(transposeContent('[D/F#]lost', 'G', 'A')).toBe('[E/G#]lost');
+  });
+
+  it('holds anchored chords on their columns when the one before them widens', () => {
+    // G -> Bb is a character longer, so a token-wise rewrite would push Eb to
+    // column 15 and re-point it at "ow" instead of "how".
+    const src = ['G             C', 'Amazing grace how sweet'].join('\n');
+    const out = transposeContent(src, 'G', 'Bb');
+    expect(out.split('\n')[0]).toBe(`Bb${' '.repeat(12)}Eb`);
+    expect(parseSong(out).lines[0]).toMatchObject({
+      pairs: [
+        { chord: 'Bb', lyric: 'Amazing grace ' },
+        { chord: 'Eb', lyric: 'how sweet' },
+      ],
+    });
+  });
+
+  it('respaces the bracketed spelling too', () => {
+    expect(transposeContent(['[G]      [C]', 'Amazing grace'].join('\n'), 'G', 'A')).toBe(
+      ['[A]      [D]', 'Amazing grace'].join('\n'),
+    );
+  });
+
+  it('nudges a chord right rather than colliding when there is no room', () => {
+    // C sits at column 2, but Bb already fills 0-1 — one space is all it can
+    // give up, so the chart stays readable even though the column shifts.
+    expect(transposeContent('G C', 'G', 'Bb')).toBe('Bb Eb');
   });
 });
 

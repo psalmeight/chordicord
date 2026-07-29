@@ -19,13 +19,25 @@ body {
   font-family: var(--app-font);
 }
 
-/* Chord charts, the editor preview and the ChordPro textarea. Alignment
-   doesn't depend on a monospace grid — ChordChart lays each chord/syllable
-   pair out as its own inline-block column — so the tracking below is free to
-   open the letters up without shifting chords off their syllables. */
+/* Chord charts and the editor preview. Alignment doesn't depend on a
+   monospace grid — ChordChart lays each chord/syllable pair out as its own
+   inline-block column — so the tracking below is free to open the letters up
+   without shifting chords off their syllables. */
 .chart {
   font-family: var(--chart-font);
   letter-spacing: 0.02em;
+}
+
+/* The ChordPro textarea, which is the one place a monospace grid is load
+   bearing: a chord written above its lyric anchors to the column it starts
+   at, and only equal-width characters make the column you see the column the
+   parser reads. Deliberately not --chart-font, and deliberately not the font
+   preference — that setting is about reading a chart on a music stand, and
+   picking a proportional face there must not break authoring. */
+.chart-source {
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  letter-spacing: normal;
+  tab-size: 4;
 }
 
 @media print {

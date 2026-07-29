@@ -1,9 +1,13 @@
 import { Box, Text } from '@chakra-ui/react';
-import { useMemo } from 'react';
-import { parseSong, transposeSong, type Line } from '@/lib/chordpro';
+import { Fragment, useMemo } from 'react';
+import { lyricRuns, parseSong, transposeSong, type Line } from '@/lib/chordpro';
 import { sectionKey } from '@/lib/noteColors';
 import { NoteCardList } from '@/components/NoteCardView';
 import type { NoteCard } from '@/types';
+
+/** An author's note, wherever it turns up — chord row, lyric or its own line.
+ *  Red, bold and italic so it never reads as something to play or sing. */
+const NOTE_STYLE = { color: 'red.600', fontStyle: 'italic', fontWeight: 'bold' } as const;
 
 interface Props {
   content: string;
@@ -83,24 +87,46 @@ function ChartLine({ line, showChords }: { line: Line; showChords: boolean }) {
       if (!showChords) return null;
       return (
         <Box mb={1} fontWeight="bold" color="blue.600">
-          {line.chords.join('   ')}
+          {line.chords.map((token, i) => (
+            <Box as="span" key={i} pr={3} {...(token.note ? NOTE_STYLE : null)}>
+              {token.text}
+            </Box>
+          ))}
         </Box>
       );
 
-    case 'lyrics':
+    case 'lyrics': {
+      const runs = lyricRuns(line.pairs);
       return (
         <Box whiteSpace="pre-wrap" mb={showChords ? 1 : 0}>
           {line.pairs.map((pair, i) => (
             <Box key={i} display="inline-block" verticalAlign="bottom" whiteSpace="pre">
               {showChords && (
-                <Box height="1.3em" fontWeight="bold" color="blue.600" pr={pair.chord ? 2 : 0}>
+                <Box
+                  height="1.3em"
+                  fontWeight="bold"
+                  color="blue.600"
+                  pr={pair.chord ? 2 : 0}
+                  {...(pair.note ? NOTE_STYLE : null)}
+                >
                   {pair.chord}
                 </Box>
               )}
-              <Box>{pair.lyric}</Box>
+              <Box>
+                {runs[i].map((run, j) =>
+                  run.note ? (
+                    <Box as="span" key={j} {...NOTE_STYLE}>
+                      {run.text}
+                    </Box>
+                  ) : (
+                    <Fragment key={j}>{run.text}</Fragment>
+                  ),
+                )}
+              </Box>
             </Box>
           ))}
         </Box>
       );
+    }
   }
 }
