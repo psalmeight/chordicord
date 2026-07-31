@@ -9,6 +9,10 @@ import type { NoteCard } from '@/types';
  *  Red, bold and italic so it never reads as something to play or sing. */
 const NOTE_STYLE = { color: 'red.600', fontStyle: 'italic', fontWeight: 'bold' } as const;
 
+/** Chart line height, shared so an empty lyric row can be held to exactly the
+ *  height a line of text would have taken. */
+const LINE_HEIGHT = 1.35;
+
 interface Props {
   content: string;
   /** The key the stored content is written in. */
@@ -43,7 +47,7 @@ export default function ChordChart({
   const shown = new Set<string>();
 
   return (
-    <Box className="chart" fontSize={`${fontSize}px`} lineHeight="1.35">
+    <Box className="chart" fontSize={`${fontSize}px`} lineHeight={LINE_HEIGHT}>
       {song.lines.map((line, i) => {
         const out = [<ChartLine key={i} line={line} showChords={showChords} />];
         if (line.type === 'section' && sectionNotes) {
@@ -112,7 +116,10 @@ function ChartLine({ line, showChords }: { line: Line; showChords: boolean }) {
                   {pair.chord}
                 </Box>
               )}
-              <Box>
+              {/* A chord past the end of the lyric has nothing under it. The
+                  empty row still has to stand a full line tall, or bottom
+                  alignment drops that column's chord down beside the lyrics. */}
+              <Box minHeight={`${LINE_HEIGHT}em`}>
                 {runs[i].map((run, j) =>
                   run.note ? (
                     <Box as="span" key={j} {...NOTE_STYLE}>
