@@ -46,7 +46,7 @@ export default function Songs() {
               <Text ml={1}>Tracks</Text>
             </Button>
             <Link to="/songs/new">
-              <Button colorPalette="blue" size="sm">
+              <Button colorPalette="brand" size="sm">
                 <Plus size={16} />
                 <Text ml={1}>New song</Text>
               </Button>
@@ -113,7 +113,7 @@ export default function Songs() {
                 p={4}
                 borderRadius="lg"
                 borderWidth="1px"
-                _hover={{ borderColor: 'blue.400' }}
+                _hover={{ borderColor: 'brand.400' }}
               >
                 <Flex justify="space-between" align="center" gap={4} wrap="wrap">
                   <Box>
@@ -126,12 +126,12 @@ export default function Songs() {
                   </Box>
                   <HStack gap={2} fontSize="sm" color="gray.600">
                     {song.hasAudio && (
-                      <Box color="blue.500" title="Has a reference track">
+                      <Box color="brand.500" title="Has a reference track">
                         <Music2 size={14} />
                       </Box>
                     )}
                     {song.key ? (
-                      <Badge colorPalette="blue">{song.key}</Badge>
+                      <Badge colorPalette="brand">{song.key}</Badge>
                     ) : (
                       <Badge colorPalette="gray" variant="outline">No key</Badge>
                     )}

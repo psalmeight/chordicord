@@ -124,7 +124,7 @@ export default function AudioPlayer({ songId, canEdit, onRemoved, tuneOverride, 
       <Flex align="center" gap={3} wrap="wrap">
         <Button
           size="sm"
-          colorPalette="blue"
+          colorPalette="brand"
           onClick={player.toggle}
           disabled={player.status !== 'ready'}
           aria-label={player.playing ? 'Pause' : 'Play'}
@@ -152,7 +152,7 @@ export default function AudioPlayer({ songId, canEdit, onRemoved, tuneOverride, 
           cursor={player.status === 'ready' ? 'pointer' : 'default'}
           onClick={player.status === 'ready' ? scrub : undefined}
         >
-          <Box h="100%" w={`${progress}%`} bg="blue.500" borderRadius="full" />
+          <Box h="100%" w={`${progress}%`} bg="brand.500" borderRadius="full" />
         </Box>
 
         <HStack gap={1}>
@@ -168,7 +168,7 @@ export default function AudioPlayer({ songId, canEdit, onRemoved, tuneOverride, 
           </Button>
           <Text
             fontSize="sm"
-            color={semitones === 0 ? 'gray.600' : 'blue.600'}
+            color={semitones === 0 ? 'gray.600' : 'brand.600'}
             fontWeight="medium"
             minW="105px"
             textAlign="center"
@@ -191,7 +191,7 @@ export default function AudioPlayer({ songId, canEdit, onRemoved, tuneOverride, 
             </Button>
           )}
           {dirty && (
-            <Button size="xs" colorPalette="blue" variant="subtle" onClick={saveTune} loading={savingTune}>
+            <Button size="xs" colorPalette="brand" variant="subtle" onClick={saveTune} loading={savingTune}>
               <Check size={12} />
               <Text ml={1}>Save tune</Text>
             </Button>

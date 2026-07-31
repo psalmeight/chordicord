@@ -66,7 +66,7 @@ export default function MetronomeWidget() {
             py={2}
             mb={2}
             transition="background 70ms ease-out"
-            bg={playing && flash ? (accent ? 'blue.300' : 'blue.100') : 'gray.50'}
+            bg={playing && flash ? (accent ? 'brand.300' : 'brand.100') : 'gray.50'}
           >
             <Flex align="center" justify="center" gap={1}>
               <Text fontSize="4xl" fontWeight="bold" fontVariantNumeric="tabular-nums" lineHeight="1">
@@ -86,7 +86,7 @@ export default function MetronomeWidget() {
                 w="10px"
                 h="10px"
                 borderRadius="full"
-                bg={currentBeat === i ? (i === 0 ? 'blue.500' : 'blue.300') : 'gray.200'}
+                bg={currentBeat === i ? (i === 0 ? 'brand.500' : 'brand.300') : 'gray.200'}
                 transition="background 60ms"
               />
             ))}
@@ -118,7 +118,7 @@ export default function MetronomeWidget() {
               value={beatsPerBar}
               onChange={(e) => setBeatsPerBar(Number(e.target.value))}
               aria-label="Beats per bar"
-              style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #CBD5E0' }}
+              style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--line-2)' }}
             >
               {BEAT_OPTIONS.map((n) => (
                 <option key={n} value={n}>
@@ -133,7 +133,7 @@ export default function MetronomeWidget() {
 
           <Button
             w="100%"
-            colorPalette={playing ? 'red' : 'blue'}
+            colorPalette={playing ? 'red' : 'brand'}
             onClick={() => (playing ? stop() : start())}
           >
             {playing ? <Pause size={16} /> : <Play size={16} />}
@@ -148,7 +148,7 @@ export default function MetronomeWidget() {
           h="52px"
           w={open ? '52px' : 'auto'}
           px={open ? 0 : 4}
-          colorPalette={playing ? 'green' : 'blue'}
+          colorPalette={playing ? 'green' : 'brand'}
           onClick={() => setOpen(!open)}
           aria-label="Metronome"
           title="Metronome"

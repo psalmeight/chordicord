@@ -84,7 +84,7 @@ export default function SongView() {
           </Button>
           {canEdit(user) && (
             <Link to={`/songs/${song.id}/edit`}>
-              <Button size="sm" colorPalette="blue">
+              <Button size="sm" colorPalette="brand">
                 <Pencil size={16} />
                 <Text ml={1}>Edit</Text>
               </Button>
@@ -99,7 +99,7 @@ export default function SongView() {
 
         <HStack gap={4} mt={3} fontSize="sm" color="gray.700" wrap="wrap">
           {hasKey ? (
-            <Badge colorPalette="blue">Key of {song.key}</Badge>
+            <Badge colorPalette="brand">Key of {song.key}</Badge>
           ) : (
             <Badge colorPalette="gray" variant="outline">Key not set</Badge>
           )}
@@ -141,7 +141,7 @@ export default function SongView() {
                 <select
                   value={capo}
                   onChange={(e) => setCapo(Number(e.target.value))}
-                  style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #CBD5E0' }}
+                  style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--line-2)' }}
                 >
                   <option value={0}>None</option>
                   {Array.from({ length: 11 }, (_, i) => i + 1).map((n) => (
@@ -195,7 +195,7 @@ export default function SongView() {
             plays at its original pitch.{' '}
             {canEdit(user) ? (
               <Link to={`/songs/${song.id}/edit`}>
-                <Text as="span" color="blue.600" textDecoration="underline">
+                <Text as="span" color="brand.600" textDecoration="underline">
                   Set the key
                 </Text>
               </Link>

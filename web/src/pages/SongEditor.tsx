@@ -229,7 +229,7 @@ export default function SongEditor() {
               <Trash2 size={16} />
             </Button>
           )}
-          <Button size="sm" colorPalette="blue" onClick={save} loading={saving}>
+          <Button size="sm" colorPalette="brand" onClick={save} loading={saving}>
             Save
           </Button>
         </HStack>
@@ -278,13 +278,13 @@ export default function SongEditor() {
           </Grid>
 
           {offerConvert && (
-            <Box p={3} bg="blue.50" borderRadius="md" borderLeftWidth="3px" borderColor="blue.400">
+            <Box p={3} bg="brand.50" borderRadius="md" borderLeftWidth="3px" borderColor="brand.400">
               <Text fontSize="sm" mb={2}>
                 The chart is written in <strong>{contentKey}</strong> and you've selected{' '}
                 <strong>{form.key}</strong>. Should the chords be rewritten?
               </Text>
               <HStack gap={2} wrap="wrap">
-                <Button size="xs" colorPalette="blue" onClick={convertChart}>
+                <Button size="xs" colorPalette="brand" onClick={convertChart}>
                   Transpose the chart to {form.key}
                 </Button>
                 <Button size="xs" variant="outline" onClick={relabelOnly}>
@@ -354,7 +354,7 @@ export default function SongEditor() {
                         value={card.section}
                         onChange={(e) => patchCard(i, { section: e.target.value })}
                         title="Where this note appears"
-                        style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #CBD5E0', maxWidth: 170 }}
+                        style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--line-2)', maxWidth: 170 }}
                       >
                         <option value="">General (top)</option>
                         {sectionOptions.map((s) => (
@@ -532,7 +532,7 @@ function Select({
         width: '100%',
         padding: '8px 10px',
         borderRadius: 6,
-        border: '1px solid #E2E8F0',
+        border: '1px solid var(--line)',
         background: 'white',
       }}
     >

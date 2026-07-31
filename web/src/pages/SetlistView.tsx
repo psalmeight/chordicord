@@ -13,6 +13,7 @@ import { keyOptions } from '@/lib/chords';
 import { groupNotes } from '@/lib/noteColors';
 import { useApp } from '@/contexts/AppContext';
 import AudioPlayer from '@/components/AudioPlayer';
+import AutoScrollWidget from '@/components/AutoScrollWidget';
 import ChordChart from '@/components/ChordChart';
 import { NoteCardList } from '@/components/NoteCardView';
 import type { Setlist, SetlistItem, Song } from '@/types';
@@ -162,7 +163,7 @@ export default function SetlistView() {
                 <Pencil size={16} />
                 <Text ml={1}>Edit</Text>
               </Button>
-              <Button size="sm" colorPalette="blue" onClick={() => setAdding((v) => !v)}>
+              <Button size="sm" colorPalette="brand" onClick={() => setAdding((v) => !v)}>
                 <Plus size={16} />
                 <Text ml={1}>Add song</Text>
               </Button>
@@ -215,7 +216,7 @@ export default function SetlistView() {
                 <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
                   Cancel
                 </Button>
-                <Button size="sm" colorPalette="blue" onClick={saveSetlist} loading={savingSetlist}>
+                <Button size="sm" colorPalette="brand" onClick={saveSetlist} loading={savingSetlist}>
                   Save
                 </Button>
               </HStack>
@@ -286,7 +287,7 @@ export default function SetlistView() {
                       <Button
                         size="xs"
                         variant={openPlayers[item.id] ? 'subtle' : 'outline'}
-                        colorPalette="blue"
+                        colorPalette="brand"
                         onClick={() => togglePlayer(item.id)}
                       >
                         <Music2 size={14} />
@@ -301,7 +302,7 @@ export default function SetlistView() {
                         style={{
                           padding: '6px 10px',
                           borderRadius: 6,
-                          border: '1px solid #CBD5E0',
+                          border: '1px solid var(--line-2)',
                           fontWeight: 600,
                         }}
                       >
@@ -360,6 +361,8 @@ export default function SetlistView() {
           })}
         </Stack>
       )}
+
+      {items.length > 0 && <AutoScrollWidget />}
     </Stack>
   );
 }

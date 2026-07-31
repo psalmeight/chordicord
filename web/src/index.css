@@ -1,4 +1,22 @@
 :root {
+  /* Theme colours, matching the FCF Tagbilaran site. The Chakra tokens in
+     lib/system.ts carry the same values; these exist for the handful of plain
+     <select>/<input> elements that style themselves outside Chakra. */
+  --bg: #f8f6f2;
+  --paper: #fdfcfa;
+  --ink: #141a22;
+  --dark: #101720;
+  --darker: #0b1017;
+  --panel: #182231;
+  --brick: #8f3a30;
+  --brick-hover: #a8443a;
+  --gold: #d3a24c;
+  --line: #e4ded3;
+  --line-2: #dfd8cc;
+  --muted: #5d564e;
+  --muted-2: #7b7268;
+  --on-dark: rgba(248, 246, 242, 0.72);
+
   /* Chrome — nav, forms, buttons. Fixed: the font preference exists for
      reading charts, not for restyling the shell. */
   --app-font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;

@@ -38,8 +38,17 @@ export default function Invite() {
   };
 
   return (
-    <Center minH="100vh" bg="gray.50">
-      <Box bg="white" p={8} borderRadius="lg" borderWidth="1px" w="full" maxW="sm">
+    <Center minH="100vh" bg="gray.950">
+      <Box
+        bg="white"
+        p={8}
+        borderRadius="lg"
+        borderWidth="1px"
+        borderTopWidth="4px"
+        borderTopColor="brand.600"
+        w="full"
+        maxW="sm"
+      >
         <Heading size="lg" mb={1}>
           Welcome to FCF Chords
         </Heading>
@@ -71,7 +80,7 @@ export default function Invite() {
                 {error}
               </Text>
             )}
-            <Button type="submit" colorPalette="blue" loading={busy}>
+            <Button type="submit" colorPalette="brand" loading={busy}>
               Create account
             </Button>
           </Stack>

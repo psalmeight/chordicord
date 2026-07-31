@@ -48,7 +48,7 @@ export default function Setlists() {
       <Flex align="center" justify="space-between" wrap="wrap" gap={3}>
         <Heading size="lg">Setlists</Heading>
         {canEdit(user) && (
-          <Button size="sm" colorPalette="blue" onClick={() => setCreating((v) => !v)}>
+          <Button size="sm" colorPalette="brand" onClick={() => setCreating((v) => !v)}>
             <Plus size={16} />
             <Text ml={1}>New setlist</Text>
           </Button>
@@ -65,7 +65,7 @@ export default function Setlists() {
               maxW="sm"
             />
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} maxW="200px" />
-            <Button colorPalette="blue" onClick={create}>
+            <Button colorPalette="brand" onClick={create}>
               Create
             </Button>
           </HStack>
@@ -84,7 +84,7 @@ export default function Setlists() {
         <Stack gap={2}>
           {setlists.map((setlist) => (
             <Link key={setlist.id} to={`/setlists/${setlist.id}`}>
-              <Box bg="white" p={4} borderRadius="lg" borderWidth="1px" _hover={{ borderColor: 'blue.400' }}>
+              <Box bg="white" p={4} borderRadius="lg" borderWidth="1px" _hover={{ borderColor: 'brand.400' }}>
                 <Flex justify="space-between" align="center">
                   <Text fontWeight="semibold">{setlist.name}</Text>
                   {setlist.serviceDate && (

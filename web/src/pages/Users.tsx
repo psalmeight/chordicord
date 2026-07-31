@@ -81,7 +81,7 @@ export default function Users() {
     <Stack gap={5}>
       <Flex align="center" justify="space-between" wrap="wrap" gap={3}>
         <Heading size="lg">Team</Heading>
-        <Button size="sm" colorPalette="blue" onClick={() => setCreating((v) => !v)}>
+        <Button size="sm" colorPalette="brand" onClick={() => setCreating((v) => !v)}>
           <Plus size={16} />
           <Text ml={1}>Invite member</Text>
         </Button>
@@ -106,7 +106,7 @@ export default function Users() {
             <select
               value={form.role}
               onChange={(e) => setForm({ ...form, role: e.target.value as Role })}
-              style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #E2E8F0' }}
+              style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid var(--line)' }}
             >
               {ROLES.map((r) => (
                 <option key={r} value={r}>
@@ -114,7 +114,7 @@ export default function Users() {
                 </option>
               ))}
             </select>
-            <Button colorPalette="blue" onClick={invite}>
+            <Button colorPalette="brand" onClick={invite}>
               Create invite
             </Button>
           </HStack>
@@ -126,7 +126,7 @@ export default function Users() {
 
       {/* No email is sent — the admin copies this link to the new member. */}
       {inviteLink && (
-        <Box bg="blue.50" p={4} borderRadius="lg" borderWidth="1px" borderColor="blue.200">
+        <Box bg="brand.50" p={4} borderRadius="lg" borderWidth="1px" borderColor="brand.200">
           <Text fontSize="sm" fontWeight="medium" mb={2}>
             Send this invite link — it expires in 7 days.
           </Text>
@@ -168,7 +168,7 @@ export default function Users() {
                   <select
                     value={u.role}
                     onChange={(e) => changeRole(u.id, e.target.value as Role)}
-                    style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #CBD5E0' }}
+                    style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--line-2)' }}
                   >
                     {ROLES.map((r) => (
                       <option key={r} value={r}>

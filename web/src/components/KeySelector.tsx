@@ -35,7 +35,7 @@ export default function KeySelector({ originalKey, value, onChange }: Props) {
         style={{
           padding: '6px 10px',
           borderRadius: 6,
-          border: '1px solid #CBD5E0',
+          border: '1px solid var(--line-2)',
           fontWeight: 600,
           minWidth: 110,
         }}
