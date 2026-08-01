@@ -1,7 +1,7 @@
 import {
   Badge, Box, Button, Flex, HStack, Heading, Spinner, Stack, Text,
 } from '@chakra-ui/react';
-import { ArrowLeft, Gauge, Minus, Pencil, Plus, Printer } from 'lucide-react';
+import { ArrowLeft, FileDown, Gauge, Minus, Pencil, Plus, Printer } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import api, { apiError } from '@/lib/api';
@@ -32,6 +32,7 @@ export default function SongView() {
   const [hasAudio, setHasAudio] = useState(false);
   // Bumped on upload so the player remounts and pulls a fresh signed URL.
   const [audioVersion, setAudioVersion] = useState(0);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   useEffect(() => {
     api
@@ -66,6 +67,36 @@ export default function SongView() {
         : [];
   const notes = groupNotes(cards);
 
+  // The file is a copy of what's on screen — chosen key, capo, size and chord
+  // visibility all carry through. The renderer carries a typesetting library
+  // with it, so it is pulled in on the first download rather than up front.
+  const downloadPdf = async () => {
+    setPdfBusy(true);
+    try {
+      const { downloadSongPdf } = await import('@/lib/pdf');
+      downloadSongPdf({
+        title: song.title,
+        artist: song.artist,
+        fromKey: song.key ?? '',
+        toKey: hasKey ? chartKey : '',
+        soundingKey: displayKey,
+        capo,
+        timeSignature: song.timeSignature,
+        tempo: song.tempo,
+        feel: song.feel,
+        ccli: song.ccli,
+        content: song.content,
+        noteCards: cards,
+        fontSize: fontSize * 0.75,
+        showChords,
+      });
+    } catch (err) {
+      setError(apiError(err, 'Could not build the PDF'));
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+
   // The reference track carries its own pitch control and is not driven from
   // here: the key describes the chart, which the recording may not match.
 
@@ -81,6 +112,18 @@ export default function SongView() {
         <HStack gap={2}>
           <Button size="sm" variant="outline" onClick={() => window.print()}>
             <Printer size={16} />
+          </Button>
+          {/* Prints exactly what's on screen: the chosen key, capo, size and
+              chord visibility all carry through to the file. */}
+          <Button
+            size="sm"
+            variant="outline"
+            loading={pdfBusy}
+            onClick={downloadPdf}
+            title="Download this chart as a PDF"
+          >
+            <FileDown size={16} />
+            <Text ml={1}>PDF</Text>
           </Button>
           {canEdit(user) && (
             <Link to={`/songs/${song.id}/edit`}>

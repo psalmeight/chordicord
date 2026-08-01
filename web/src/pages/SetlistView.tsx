@@ -2,7 +2,7 @@ import {
   Badge, Box, Button, Flex, HStack, Heading, Input, Spinner, Stack, Text, Textarea,
 } from '@chakra-ui/react';
 import {
-  ArrowLeft, ChevronDown, ChevronUp, Music2, Pencil, Plus, Printer, Trash2, X,
+  ArrowLeft, ChevronDown, ChevronUp, FileDown, Music2, Pencil, Plus, Printer, Trash2, X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -11,12 +11,27 @@ import api, { apiError } from '@/lib/api';
 import { canEdit } from '@/lib/auth';
 import { keyOptions } from '@/lib/chords';
 import { groupNotes } from '@/lib/noteColors';
+import type { PdfSong } from '@/lib/pdf';
 import { useApp } from '@/contexts/AppContext';
 import AudioPlayer from '@/components/AudioPlayer';
 import AutoScrollWidget from '@/components/AutoScrollWidget';
 import ChordChart from '@/components/ChordChart';
 import { NoteCardList } from '@/components/NoteCardView';
 import type { Setlist, SetlistItem, Song } from '@/types';
+
+/** A setlist row as the PDF renderer wants it — printed in the service key,
+ *  not the key the chart was written in. */
+const toPdfSong = (item: SetlistItem): PdfSong => ({
+  title: item.title,
+  artist: item.artist,
+  fromKey: item.key ?? '',
+  toKey: item.keyOverride ?? item.key ?? '',
+  timeSignature: item.timeSignature,
+  tempo: item.tempo,
+  feel: item.feel,
+  content: item.content,
+  noteCards: item.noteCards,
+});
 
 export default function SetlistView() {
   const { id } = useParams();
@@ -34,6 +49,7 @@ export default function SetlistView() {
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({ name: '', serviceDate: '', notes: '' });
   const [savingSetlist, setSavingSetlist] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   const load = () =>
     api
@@ -89,6 +105,34 @@ export default function SetlistView() {
 
   const togglePlayer = (itemId: string) =>
     setOpenPlayers((prev) => ({ ...prev, [itemId]: !prev[itemId] }));
+
+  // The PDF renderer carries a typesetting library with it, so it is pulled in
+  // on the first download rather than on every page load.
+  const downloadPdf = async () => {
+    setPdfBusy(true);
+    try {
+      const { downloadSetlistPdf } = await import('@/lib/pdf');
+      downloadSetlistPdf(
+        {
+          title: setlist!.name,
+          subtitle: setlist!.serviceDate
+            ? dayjs(setlist!.serviceDate).format('dddd, D MMMM YYYY')
+            : undefined,
+          notes: setlist!.notes,
+        },
+        items.map(toPdfSong),
+      );
+    } catch (err) {
+      setError(apiError(err, 'Could not build the PDF'));
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+
+  const downloadItemPdf = async (item: SetlistItem) => {
+    const { downloadSongPdf } = await import('@/lib/pdf');
+    downloadSongPdf(toPdfSong(item));
+  };
 
   // Saving the recording's own tune clears the per-setlist override, mirroring
   // how choosing the song's own key clears key_override. Updated locally so the
@@ -156,6 +200,17 @@ export default function SetlistView() {
         <HStack gap={2}>
           <Button size="sm" variant="outline" onClick={() => window.print()}>
             <Printer size={16} />
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={items.length === 0}
+            loading={pdfBusy}
+            onClick={downloadPdf}
+            title="Download the whole setlist as one PDF, a song per page"
+          >
+            <FileDown size={16} />
+            <Text ml={1}>PDF</Text>
           </Button>
           {editable && (
             <>
@@ -283,6 +338,14 @@ export default function SetlistView() {
                   </Box>
 
                   <HStack gap={2} className="no-print">
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => downloadItemPdf(item)}
+                      title={`Download "${item.title}" as a PDF, in this setlist's key`}
+                    >
+                      <FileDown size={14} />
+                    </Button>
                     {item.hasAudio && (
                       <Button
                         size="xs"
