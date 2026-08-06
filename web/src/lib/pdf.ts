@@ -329,6 +329,16 @@ function drawChart(ctx: Ctx, song: PdfSong) {
         }
         break;
       }
+      case 'heading': {
+        // "## text" / "### text" — oversized bold lines, matching the chart.
+        const hs = size * (line.level === 2 ? 1.5 : 1.25);
+        const lineH = hs * 1.4;
+        ensure(ctx, lineH);
+        style(ctx, hs, 'bold', INK);
+        ctx.doc.text(safe(line.text), MARGIN.left, baseline(ctx.y + 2, hs));
+        ctx.y += lineH + 2;
+        break;
+      }
       case 'chords':
         if (showChords) drawChordLine(ctx, line, chordSize);
         break;

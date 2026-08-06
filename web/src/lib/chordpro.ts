@@ -6,6 +6,7 @@
  *   [G]Amazing [C]grace  inline chords, anchored to the syllable after them
  *   | G | C | D |        a chord-only line, rendered as-is
  *   # a comment          ignored
+ *   ## Big text          oversized heading line ("###" for a smaller one)
  *
  * Chords may also be written on their own line above the lyric, in which case
  * each chord anchors to the column it starts at:
@@ -50,6 +51,7 @@ export type Line =
   | { type: 'section'; name: string }
   | { type: 'lyrics'; pairs: ChordPair[] }
   | { type: 'chords'; chords: ChordToken[] }
+  | { type: 'heading'; text: string; level: 2 | 3 }
   | { type: 'blank' };
 
 export interface ParsedSong {
@@ -58,8 +60,9 @@ export interface ParsedSong {
 
 const SECTION_BRACE_RE = /^\{\s*(.+?)\s*\}$/;
 const SECTION_COLON_RE = /^([A-Za-z][A-Za-z0-9 '’\-]{0,30}):\s*$/;
-/** A line of only bar-separated chords, e.g. "| G | Em7 | C |" or "G  C  D". */
-const CHORD_LINE_RE = /^[|\s]*(?:[A-G][^\s|]*[\s|]*)+$/;
+/** A line of only bar-separated chords, e.g. "| G | Em7 | C |" or "G  C  D".
+ *  A token may open with "(" for an implied chord like "(C)". */
+const CHORD_LINE_RE = /^[|\s]*(?:\(?[A-G][^\s|]*[\s|]*)+$/;
 /** A line of nothing but bracketed chords, e.g. "  [G]     [C]". */
 const BRACKET_LINE_RE = /^(?:\[[^\]]*\]\s*)+$/;
 /** An author's note. Kept to one line so a stray asterisk can't run away with
@@ -87,6 +90,7 @@ type LineKind =
   | { kind: 'blank' }
   | { kind: 'comment' }
   | { kind: 'section'; name: string }
+  | { kind: 'heading'; text: string; level: 2 | 3 }
   | { kind: 'chords' }
   | { kind: 'lyrics' };
 
@@ -97,6 +101,15 @@ type LineKind =
  */
 function classifyLine(line: string): LineKind {
   if (!line.trim()) return { kind: 'blank' };
+
+  // Markdown-style headings for oversized text: "## Big" and "### smaller".
+  // Checked before comments because they share the # sigil — a single # keeps
+  // its long-standing meaning as a comment line.
+  const heading = /^(##+)\s*(.+)$/.exec(line.trim());
+  if (heading) {
+    return { kind: 'heading', text: heading[2], level: heading[1].length === 2 ? 2 : 3 };
+  }
+
   if (line.trimStart().startsWith('#')) return { kind: 'comment' };
 
   const brace = SECTION_BRACE_RE.exec(line.trim());
@@ -228,6 +241,9 @@ export function parseSong(content: string): ParsedSong {
       case 'section':
         lines.push({ type: 'section', name: classified.name });
         break;
+      case 'heading':
+        lines.push({ type: 'heading', text: classified.text, level: classified.level });
+        break;
       case 'chords':
         lines.push({
           type: 'chords',
@@ -273,6 +289,13 @@ function parseLyricLine(line: string): ChordPair[] {
 export function transposeSong(song: ParsedSong, fromKey: string, toKey: string): ParsedSong {
   if (fromKey === toKey) return song;
 
+  // A chord slot usually holds one chord, but a bracketed bar phrase —
+  // "[| D | G | Em7 A |]" — parses as a single token whose text carries the
+  // whole run. Transposing word-by-word covers both: bars, spacing and
+  // anything that isn't a chord pass through unchanged.
+  const tr = (text: string) =>
+    text.replace(/[^\s|]+/g, (token) => transposeChordToKey(token, fromKey, toKey));
+
   return {
     lines: song.lines.map((line) => {
       if (line.type === 'lyrics') {
@@ -280,16 +303,14 @@ export function transposeSong(song: ParsedSong, fromKey: string, toKey: string):
           ...line,
           pairs: line.pairs.map((p) => ({
             ...p,
-            chord: p.chord && !p.note ? transposeChordToKey(p.chord, fromKey, toKey) : p.chord,
+            chord: p.chord && !p.note ? tr(p.chord) : p.chord,
           })),
         };
       }
       if (line.type === 'chords') {
         return {
           ...line,
-          chords: line.chords.map((t) =>
-            t.note ? t : { ...t, text: transposeChordToKey(t.text, fromKey, toKey) },
-          ),
+          chords: line.chords.map((t) => (t.note ? t : { ...t, text: tr(t.text) })),
         };
       }
       return line;
@@ -519,6 +540,8 @@ export function toChordPro(song: ParsedSong): string {
       switch (line.type) {
         case 'section':
           return `{${line.name}}`;
+        case 'heading':
+          return `${'#'.repeat(line.level)} ${line.text}`;
         case 'chords':
           return line.chords.map((t) => (t.note ? `*${t.text}*` : t.text)).join(' ');
         case 'lyrics':

@@ -77,6 +77,8 @@ type Song struct {
 	NoteCards     NoteCards      `db:"note_cards" json:"noteCards"`
 	Tags          pq.StringArray `db:"tags" json:"tags"`
 	Content       string         `db:"content" json:"content"`
+	// How many columns the chart renders in (1 or 2).
+	ChartColumns  int            `db:"chart_columns" json:"chartColumns"`
 	CreatedBy     *string        `db:"created_by" json:"createdBy"`
 	UpdatedBy     *string        `db:"updated_by" json:"updatedBy"`
 	CreatedAt     time.Time      `db:"created_at" json:"createdAt"`
@@ -99,7 +101,8 @@ type SongAudio struct {
 	StoragePath string `db:"storage_path" json:"-"`
 	Filename    string `db:"filename" json:"filename"`
 	SizeBytes   int64  `db:"size_bytes" json:"sizeBytes"`
-	// Saved playback pitch offset in semitones. 0 = the recording as uploaded.
+	// The recording's baseline pitch offset in semitones (0 = as uploaded).
+	// Frozen — per-performance tuning lives on setlist_items.tune_offset.
 	TuneOffset int       `db:"tune_offset" json:"tuneOffset"`
 	UploadedBy *string   `db:"uploaded_by" json:"uploadedBy"`
 	CreatedAt  time.Time `db:"created_at" json:"createdAt"`
@@ -124,11 +127,15 @@ type Setlist struct {
 	UpdatedAt   time.Time  `db:"updated_at" json:"updatedAt"`
 }
 
-// SetlistItem carries the joined song fields so a setlist renders in one query.
+// SetlistItem owns a snapshot copy of its song, taken when the song was added
+// to the setlist. Title through NoteCards are the item's own columns — editing
+// them never touches the songbank, and songbank edits never leak in.
 type SetlistItem struct {
-	ID          string  `db:"id" json:"id"`
-	SetlistID   string  `db:"setlist_id" json:"setlistId"`
-	SongID      string  `db:"song_id" json:"songId"`
+	ID        string `db:"id" json:"id"`
+	SetlistID string `db:"setlist_id" json:"setlistId"`
+	// The songbank song this was copied from — only the audio link and re-sync
+	// source. nil once the songbank song has been deleted.
+	SongID      *string `db:"song_id" json:"songId"`
 	Position    int     `db:"position" json:"position"`
 	KeyOverride *string `db:"key_override" json:"keyOverride"`
 	// Per-setlist tune override; nil falls back to AudioTuneOffset.
@@ -142,8 +149,12 @@ type SetlistItem struct {
 	Feel          string    `db:"feel" json:"feel"`
 	Content       string    `db:"content" json:"content"`
 	NoteCards     NoteCards `db:"note_cards" json:"noteCards"`
+	ChartColumns  int       `db:"chart_columns" json:"chartColumns"`
 	// Joined from song_audio so the setlist view can offer play-along in one
 	// query. AudioTuneOffset is the recording's own saved tune (the fallback).
 	HasAudio        bool `db:"has_audio" json:"hasAudio"`
 	AudioTuneOffset int  `db:"audio_tune_offset" json:"audioTuneOffset"`
+	// The requesting user's own prefs, joined per-request. Never shared.
+	MyCapo  int    `db:"my_capo" json:"myCapo"`
+	MyNotes string `db:"my_notes" json:"myNotes"`
 }

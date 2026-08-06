@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -24,11 +25,13 @@ func ListSetlists(database *sqlx.DB) gin.HandlerFunc {
 	}
 }
 
-// GetSetlist returns the setlist with its items and each item's full song
-// content, so the live view needs exactly one request.
+// GetSetlist returns the setlist with its items — each item's own snapshot of
+// the song plus the requesting user's private prefs — so the live view needs
+// exactly one request.
 func GetSetlist(database *sqlx.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
+		user := middleware.GetUser(c)
 
 		var setlist models.Setlist
 		err := database.Get(&setlist,
@@ -42,14 +45,17 @@ func GetSetlist(database *sqlx.DB) gin.HandlerFunc {
 		items := []models.SetlistItem{}
 		err = database.Select(&items, `
 			SELECT i.id, i.setlist_id, i.song_id, i.position, i.key_override, i.tune_offset, i.notes,
-			       s.title, s.artist, s.song_key, s.time_signature, s.tempo, s.feel, s.content, s.note_cards,
+			       i.title, i.artist, i.song_key, i.time_signature, i.tempo, i.feel, i.content, i.note_cards,
+			       i.chart_columns,
 			       (a.song_id IS NOT NULL) AS has_audio,
-			       COALESCE(a.tune_offset, 0) AS audio_tune_offset
+			       COALESCE(a.tune_offset, 0) AS audio_tune_offset,
+			       COALESCE(p.capo, 0) AS my_capo,
+			       COALESCE(p.notes, '') AS my_notes
 			FROM setlist_items i
-			JOIN songs s ON s.id = i.song_id
 			LEFT JOIN song_audio a ON a.song_id = i.song_id
+			LEFT JOIN setlist_item_prefs p ON p.setlist_item_id = i.id AND p.user_id = $2
 			WHERE i.setlist_id = $1
-			ORDER BY i.position`, id)
+			ORDER BY i.position`, id, user.ID)
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Failed to load setlist items"})
 			return
@@ -131,6 +137,8 @@ func DeleteSetlist(database *sqlx.DB) gin.HandlerFunc {
 	}
 }
 
+// AddSetlistItem snapshots the song into the item in one statement — from this
+// moment the item is an independent copy the setlist owns.
 func AddSetlistItem(database *sqlx.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		setlistID := c.Param("id")
@@ -146,12 +154,20 @@ func AddSetlistItem(database *sqlx.DB) gin.HandlerFunc {
 
 		var id string
 		err := database.QueryRowx(`
-			INSERT INTO setlist_items (setlist_id, song_id, position, key_override, notes)
-			VALUES ($1, $2,
-			        (SELECT COALESCE(MAX(position), -1) + 1 FROM setlist_items WHERE setlist_id = $1),
-			        $3, $4)
+			INSERT INTO setlist_items
+				(setlist_id, song_id, position, key_override, notes,
+				 title, artist, song_key, time_signature, tempo, feel, content, note_cards, chart_columns)
+			SELECT $1, s.id,
+			       (SELECT COALESCE(MAX(position), -1) + 1 FROM setlist_items WHERE setlist_id = $1),
+			       $3, $4,
+			       s.title, s.artist, s.song_key, s.time_signature, s.tempo, s.feel, s.content, s.note_cards, s.chart_columns
+			FROM songs s WHERE s.id = $2
 			RETURNING id`,
 			setlistID, body.SongID, body.KeyOverride, body.Notes).Scan(&id)
+		if err == sql.ErrNoRows {
+			c.JSON(404, gin.H{"error": "Song not found"})
+			return
+		}
 		if err != nil {
 			c.JSON(400, gin.H{"error": "Failed to add song to setlist"})
 			return
@@ -160,6 +176,8 @@ func AddSetlistItem(database *sqlx.DB) gin.HandlerFunc {
 	}
 }
 
+// UpdateSetlistItem patches the item — the per-performance overrides and the
+// item's own copy of the song. Nothing here ever writes to the songbank.
 func UpdateSetlistItem(database *sqlx.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
@@ -170,21 +188,122 @@ func UpdateSetlistItem(database *sqlx.DB) gin.HandlerFunc {
 			TuneOffset *int    `json:"tuneOffset"`
 			ClearTune  bool    `json:"clearTune"`
 			Notes      *string `json:"notes"`
+			// Edits to the item's snapshot copy. Nullable columns carry an
+			// explicit Clear* flag because COALESCE can't say "set to NULL".
+			Title         *string           `json:"title"`
+			Artist        *string           `json:"artist"`
+			SongKey       *string           `json:"songKey"`
+			ClearSongKey  bool              `json:"clearSongKey"`
+			TimeSignature *string           `json:"timeSignature"`
+			Tempo         *int              `json:"tempo"`
+			ClearTempo    bool              `json:"clearTempo"`
+			Feel          *string           `json:"feel"`
+			Content       *string           `json:"content"`
+			NoteCards     *models.NoteCards `json:"noteCards"`
+			ChartColumns  *int              `json:"chartColumns"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(400, gin.H{"error": "Invalid request"})
 			return
 		}
+		if !chartColumnsValid(body.ChartColumns) {
+			c.JSON(400, gin.H{"error": "chartColumns must be 1 or 2"})
+			return
+		}
+		var noteCards interface{}
+		if body.NoteCards != nil {
+			noteCards = *body.NoteCards
+		}
 		_, err := database.Exec(`
 			UPDATE setlist_items SET
-				key_override = CASE WHEN $1 THEN NULL ELSE COALESCE($2, key_override) END,
-				tune_offset  = CASE WHEN $3 THEN NULL ELSE COALESCE($4, tune_offset) END,
-				notes        = COALESCE($5, notes)
-			WHERE id = $6 AND setlist_id = $7`,
-			body.ClearKey, body.KeyOverride, body.ClearTune, body.TuneOffset,
-			body.Notes, c.Param("itemId"), c.Param("id"))
+				key_override   = CASE WHEN $1 THEN NULL ELSE COALESCE($2, key_override) END,
+				tune_offset    = CASE WHEN $3 THEN NULL ELSE COALESCE($4, tune_offset) END,
+				notes          = COALESCE($5, notes),
+				title          = COALESCE($6, title),
+				artist         = COALESCE($7, artist),
+				song_key       = CASE WHEN $8 THEN NULL ELSE COALESCE($9, song_key) END,
+				time_signature = COALESCE($10, time_signature),
+				tempo          = CASE WHEN $11 THEN NULL ELSE COALESCE($12, tempo) END,
+				feel           = COALESCE($13, feel),
+				content        = COALESCE($14, content),
+				note_cards     = COALESCE($15::jsonb, note_cards),
+				chart_columns  = COALESCE($16, chart_columns)
+			WHERE id = $17 AND setlist_id = $18`,
+			body.ClearKey, body.KeyOverride, body.ClearTune, body.TuneOffset, body.Notes,
+			body.Title, body.Artist, body.ClearSongKey, body.SongKey, body.TimeSignature,
+			body.ClearTempo, body.Tempo, body.Feel, body.Content, noteCards, body.ChartColumns,
+			c.Param("itemId"), c.Param("id"))
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Failed to update item"})
+			return
+		}
+		c.JSON(200, gin.H{"ok": true})
+	}
+}
+
+// ResyncSetlistItem re-pulls the songbank song into the item's snapshot,
+// discarding the setlist's edits to it (including the key override). The
+// per-performance tune and everyone's personal prefs survive.
+func ResyncSetlistItem(database *sqlx.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		res, err := database.Exec(`
+			UPDATE setlist_items i SET
+				title = s.title, artist = s.artist, song_key = s.song_key,
+				time_signature = s.time_signature, tempo = s.tempo, feel = s.feel,
+				content = s.content, note_cards = s.note_cards,
+				chart_columns = s.chart_columns,
+				key_override = NULL
+			FROM songs s
+			WHERE i.id = $1 AND i.setlist_id = $2 AND s.id = i.song_id`,
+			c.Param("itemId"), c.Param("id"))
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to update from songbank"})
+			return
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			c.JSON(404, gin.H{"error": "This song is no longer in the songbank"})
+			return
+		}
+		c.JSON(200, gin.H{"ok": true})
+	}
+}
+
+// UpsertItemPrefs saves the requesting user's own capo and private note for
+// one item. Any role may call it — the row is scoped to the caller, so nobody
+// can touch anyone else's prefs.
+func UpsertItemPrefs(database *sqlx.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		user := middleware.GetUser(c)
+		var body struct {
+			Capo  *int    `json:"capo"`
+			Notes *string `json:"notes"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid request"})
+			return
+		}
+		if body.Capo != nil && (*body.Capo < 0 || *body.Capo > 11) {
+			c.JSON(400, gin.H{"error": "Capo must be between 0 and 11"})
+			return
+		}
+
+		// The INSERT ... SELECT proves the item belongs to the setlist in the
+		// URL; zero rows means a bad or foreign item id.
+		res, err := database.Exec(`
+			INSERT INTO setlist_item_prefs (setlist_item_id, user_id, capo, notes)
+			SELECT i.id, $2, COALESCE($3, 0), COALESCE($4, '')
+			  FROM setlist_items i WHERE i.id = $1 AND i.setlist_id = $5
+			ON CONFLICT (setlist_item_id, user_id) DO UPDATE SET
+				capo       = COALESCE($3, setlist_item_prefs.capo),
+				notes      = COALESCE($4, setlist_item_prefs.notes),
+				updated_at = NOW()`,
+			c.Param("itemId"), user.ID, body.Capo, body.Notes, c.Param("id"))
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to save preferences"})
+			return
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			c.JSON(404, gin.H{"error": "Setlist item not found"})
 			return
 		}
 		c.JSON(200, gin.H{"ok": true})

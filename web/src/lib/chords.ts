@@ -50,8 +50,14 @@ const CHORD_RE = /^([A-G][#b]?)((?:[^/\s]|\/(?![A-G][#b]?(?:$|[\s/])))*)(?:\/([A
 const SUFFIX_ATOM = '(?:maj|Maj|MAJ|min|Min|sus|add|dim|aug|alt|no|m|M|°|ø|\\+|-|\\d+|#|b|\\(|\\)|,|\\^)';
 const VALID_SUFFIX_RE = new RegExp(`^${SUFFIX_ATOM}*$`);
 
+/** An optional/implied chord written "(C)". The wrap is notation, not part of
+ *  the chord, so parsing sees the inside and transposing puts it back. */
+const PAREN_WRAP_RE = /^\((.+)\)$/;
+
 export function parseChord(token: string): ParsedChord | null {
-  const match = CHORD_RE.exec(token.trim());
+  const trimmed = token.trim();
+  const paren = PAREN_WRAP_RE.exec(trimmed);
+  const match = CHORD_RE.exec(paren ? paren[1] : trimmed);
   if (!match) return null;
 
   const [, root, suffix = '', bass] = match;
@@ -115,6 +121,11 @@ export function keyPrefersFlats(key: string): boolean {
  * if it doesn't parse as a chord, so odd markings pass through untouched.
  */
 export function transposeChord(token: string, semitones: number, preferFlats: boolean): string {
+  // "(C)" transposes as C and keeps its parens — parseChord unwraps them, so
+  // rebuilding from its parts below would silently drop the notation.
+  const paren = PAREN_WRAP_RE.exec(token.trim());
+  if (paren) return `(${transposeChord(paren[1], semitones, preferFlats)})`;
+
   const parsed = parseChord(token);
   if (!parsed) return token;
 

@@ -65,6 +65,8 @@ That [G]saved a wretch like [D]me
 - `{Verse 1}` marks a section (a bare `Chorus:` line works too)
 - `| G | C |` on its own line is an instrumental / turnaround
 - `#` starts a comment line
+- `## Big text` renders an oversized heading line (`###` for a smaller one)
+- `*hold*` anywhere marks a red cue that is never treated as a chord
 
 Everything else — title, artist, key, time signature, tempo, feel, CCLI number,
 tags, and free-text notes — lives in structured fields alongside the body.
@@ -78,9 +80,15 @@ not A♯.
 The **Capo** selector shows the shapes a capo'd guitarist actually fingers while
 telling you the key it sounds in.
 
-Setlists take this one step further: each song carries an optional per-service
-key, so the same song can sit in different keys in different setlists without
-ever touching the song itself.
+Setlists take this further: adding a song to a setlist takes a **copy** of it.
+The copy — chart, key, notes, note cards, tempo — is editable per setlist
+(leaders and admins, via the item's Edit button), everyone viewing the setlist
+sees those edits, and the songbank version is never touched. An **Update from
+songbank** action re-pulls the current songbank version into the copy when you
+want it. On top of that, capo and a private note on each setlist song are
+**per account**: saved to your login, synced across your devices, and invisible
+to the rest of the team. The reference track's saved pitch also lives on the
+setlist item, not the songbank.
 
 ## Tests
 
@@ -111,13 +119,16 @@ PATCH  /api/songs/:id             leader+   ?clearTempo=1
 DELETE /api/songs/:id             leader+
 
 GET    /api/setlists
-GET    /api/setlists/:id          returns setlist + items with song content
+GET    /api/setlists/:id          returns setlist + items (each item is its own
+                                  copy of the song) + your per-item prefs
 POST   /api/setlists              leader+
 PATCH  /api/setlists/:id          leader+
 DELETE /api/setlists/:id          leader+
-POST   /api/setlists/:id/items    leader+
-PATCH  /api/setlists/:id/items/:itemId
-DELETE /api/setlists/:id/items/:itemId
+POST   /api/setlists/:id/items    leader+   snapshots the song into the item
+PATCH  /api/setlists/:id/items/:itemId          leader+
+DELETE /api/setlists/:id/items/:itemId          leader+
+POST   /api/setlists/:id/items/:itemId/resync   leader+  re-pull from songbank
+PUT    /api/setlists/:id/items/:itemId/prefs    any role — own capo/private note
 POST   /api/setlists/:id/reorder  leader+
 
 GET    /api/users                 admin

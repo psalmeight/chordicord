@@ -12,6 +12,7 @@ import SongView from './pages/SongView';
 import SongEditor from './pages/SongEditor';
 import Setlists from './pages/Setlists';
 import SetlistView from './pages/SetlistView';
+import SetlistItemEditor from './pages/SetlistItemEditor';
 import Users from './pages/Users';
 
 function Protected({ children, roles }: { children: ReactNode; roles?: Role[] }) {
@@ -46,6 +47,7 @@ export default function App() {
 
       <Route path="/setlists" element={<Protected><Setlists /></Protected>} />
       <Route path="/setlists/:id" element={<Protected><SetlistView /></Protected>} />
+      <Route path="/setlists/:id/items/:itemId/edit" element={<Protected roles={['admin', 'leader']}><SetlistItemEditor /></Protected>} />
 
       <Route path="/users" element={<Protected roles={['admin']}><Users /></Protected>} />
 

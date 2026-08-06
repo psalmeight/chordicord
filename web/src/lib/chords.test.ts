@@ -25,6 +25,14 @@ describe('parseChord', () => {
     expect(parseChord('Bad')).toBeNull();
     expect(parseChord('Every')).toBeNull();
   });
+
+  it('unwraps an implied chord in parens', () => {
+    expect(parseChord('(C)')).toEqual({ root: 'C', suffix: '', bass: null });
+    expect(parseChord('(Bm7)')).toEqual({ root: 'B', suffix: 'm7', bass: null });
+    expect(parseChord('(Am7/D)')).toEqual({ root: 'A', suffix: 'm7', bass: 'D' });
+    expect(parseChord('(Grace)')).toBeNull();
+    expect(parseChord('(you)')).toBeNull();
+  });
 });
 
 describe('transposeChord', () => {
@@ -35,6 +43,11 @@ describe('transposeChord', () => {
 
   it('transposes the bass of a slash chord too', () => {
     expect(transposeChord('G/B', 2, false)).toBe('A/C#');
+  });
+
+  it('transposes an implied chord and keeps its parens', () => {
+    expect(transposeChord('(C)', 2, false)).toBe('(D)');
+    expect(transposeChord('(Am7/D)', 2, false)).toBe('(Bm7/E)');
   });
 
   it('wraps around the octave', () => {
@@ -104,6 +117,29 @@ describe('parseSong', () => {
 
   it('recognises chord-only lines', () => {
     expect(parseSong('| G | Em7 | C |').lines[0]).toEqual(row('G', 'Em7', 'C'));
+  });
+
+  it('reads ## and ### as heading lines, and a single # as a comment', () => {
+    expect(parseSong('## Final Chorus').lines[0]).toEqual({
+      type: 'heading',
+      text: 'Final Chorus',
+      level: 2,
+    });
+    expect(parseSong('###quiet ending').lines[0]).toEqual({
+      type: 'heading',
+      text: 'quiet ending',
+      level: 3,
+    });
+    expect(parseSong('# just a comment').lines).toEqual([]);
+    expect(parseSong('##').lines).toEqual([]);
+  });
+
+  it('keeps headings out of chords, transposition and alignment', () => {
+    expect(hasChords('## A B C')).toBe(false);
+    expect(transposeContent('## A little while', 'G', 'A')).toBe('## A little while');
+    expect(toAligned('## Big line')).toBe('## Big line');
+    const song = parseSong('## Final Chorus');
+    expect(parseSong(toChordPro(song)).lines).toEqual(song.lines);
   });
 });
 
@@ -193,6 +229,66 @@ describe('parseSong with chords written above the lyric', () => {
   it('counts anchored chords for hasChords', () => {
     expect(hasChords(bare)).toBe(true);
     expect(hasChords(bracketed)).toBe(true);
+  });
+});
+
+describe('implied chords in parens', () => {
+  it('reads a bar row opening with an implied chord as chords', () => {
+    expect(parseSong('(C) |Bm7 Bm/E Am7 Am7/D|').lines[0]).toEqual({
+      type: 'chords',
+      chords: [
+        { text: '(C)', note: false },
+        { text: 'Bm7', note: false },
+        { text: 'Bm/E', note: false },
+        { text: 'Am7', note: false },
+        { text: 'Am7/D', note: false },
+      ],
+    });
+  });
+
+  it('anchors a bare row opening with an implied chord onto the lyric below', () => {
+    const song = parseSong(['(C) Bsus4 B/D# E7', ' in    you'].join('\n'));
+    expect(song.lines[0]).toEqual({
+      type: 'lyrics',
+      pairs: [
+        { chord: '(C)', lyric: ' in ' },
+        { chord: 'Bsus4', lyric: '   you' },
+        { chord: 'B/D#', lyric: '' },
+        { chord: 'E7', lyric: '' },
+      ],
+    });
+  });
+
+  it('still reads a parenthesised lyric line as lyrics', () => {
+    expect(parseSong('(All) Good Days').lines[0].type).toBe('lyrics');
+    expect(parseSong('(oh oh oh)').lines[0].type).toBe('lyrics');
+  });
+
+  it('transposes implied chords in content, keeping the parens', () => {
+    expect(transposeContent('(C) |Bm7 Bm/E Am7 Am7/D|', 'D', 'E')).toBe(
+      '(D) |C#m7 C#m/F# Bm7 Bm7/E|',
+    );
+  });
+});
+
+describe('bracketed bar phrases', () => {
+  it('transposes every chord inside a bracketed bar line', () => {
+    const song = transposeSong(parseSong('[|  D  |  G  | Em7 A |  A  |]'), 'D', 'E');
+    expect(song.lines[0]).toEqual({
+      type: 'chords',
+      chords: [{ text: '|  E  |  A  | F#m7 B |  B  |', note: false }],
+    });
+  });
+
+  it('transposes a bracketed bar phrase inline in a lyric', () => {
+    const song = transposeSong(parseSong('kasing-kasing[| D  A |]  ko'), 'D', 'E');
+    expect(song.lines[0]).toEqual({
+      type: 'lyrics',
+      pairs: [
+        { chord: '', lyric: 'kasing-kasing' },
+        { chord: '| E  B |', lyric: '  ko' },
+      ],
+    });
   });
 });
 

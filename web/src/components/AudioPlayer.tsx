@@ -1,5 +1,5 @@
 import { Box, Button, Flex, HStack, Spinner, Text } from '@chakra-ui/react';
-import { Check, Minus, Music2, Pause, Play, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { Check, Link2, Link2Off, Minus, Music2, Pause, Play, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import api, { apiError } from '@/lib/api';
 import { formatTime, useAudioPlayer } from '@/lib/useAudioPlayer';
@@ -18,6 +18,19 @@ interface Props {
   tuneOverride?: number;
   /** When provided (and canEdit), a Save appears once the tune is changed. */
   onSaveTune?: (semitones: number) => Promise<void>;
+  /**
+   * Render as a thin strip and defer the signed-URL fetch and full decode
+   * until the first Play press. Setlists mount one player per song, and every
+   * track is decoded whole into memory — eager loading would fetch them all.
+   */
+  lazy?: boolean;
+  /**
+   * When provided, a link toggle appears beside the pitch controls. While
+   * linked, every pitch step reports its delta here so the caller can move
+   * the chart key in step with the track — an option, never a hard tie: the
+   * key stays independently editable and the link starts off.
+   */
+  onPitchDelta?: (delta: number) => void;
 }
 
 /** Beyond this the artefacts swamp the reference — transpose the chart instead. */
@@ -36,8 +49,14 @@ const clampShift = (n: number) => Math.max(-MAX_SHIFT, Math.min(MAX_SHIFT, n));
  * persisted (per recording, or per setlist item) so the whole team plays along
  * at the same pitch.
  */
-export default function AudioPlayer({ songId, canEdit, onRemoved, tuneOverride, onSaveTune }: Props) {
+export default function AudioPlayer({
+  songId, canEdit, onRemoved, tuneOverride, onSaveTune, lazy, onPitchDelta,
+}: Props) {
   const [track, setTrack] = useState<SongAudio | null>(null);
+  // A lazy player waits for a click before touching the network; the click
+  // also queues an auto-play so one press both loads and starts the track.
+  const [activated, setActivated] = useState(!lazy);
+  const autoPlay = useRef(false);
   const [loadError, setLoadError] = useState('');
   const [removing, setRemoving] = useState(false);
   const [semitones, setSemitones] = useState(clampShift(tuneOverride ?? 0));
@@ -48,11 +67,24 @@ export default function AudioPlayer({ songId, canEdit, onRemoved, tuneOverride, 
   const tuneInitialised = useRef(tuneOverride !== undefined);
   const [savingTune, setSavingTune] = useState(false);
   const [tuneError, setTuneError] = useState('');
+  // Whether pitch steps also move the chart key, via onPitchDelta.
+  const [linked, setLinked] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
 
-  const shiftBy = (delta: number) => setSemitones((s) => clampShift(s + delta));
+  const shiftBy = (delta: number) => {
+    const next = clampShift(semitones + delta);
+    if (next === semitones) return;
+    if (linked) onPitchDelta?.(next - semitones);
+    setSemitones(next);
+  };
+
+  const resetPitch = () => {
+    if (linked) onPitchDelta?.(-semitones);
+    setSemitones(0);
+  };
 
   useEffect(() => {
+    if (!activated) return;
     let cancelled = false;
     api
       .get<SongAudio>(`/api/songs/${songId}/audio`)
@@ -69,9 +101,18 @@ export default function AudioPlayer({ songId, canEdit, onRemoved, tuneOverride, 
     return () => {
       cancelled = true;
     };
-  }, [songId]);
+  }, [songId, activated]);
 
   const player = useAudioPlayer(track?.url ?? null, semitones);
+
+  // The activating click promised playback; deliver it as soon as the track is
+  // decoded. Autoplay policy allows it — the load began with a user gesture.
+  useEffect(() => {
+    if (autoPlay.current && player.status === 'ready') {
+      autoPlay.current = false;
+      player.toggle();
+    }
+  }, [player.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const remove = async () => {
     if (!onRemoved) return;
@@ -109,6 +150,30 @@ export default function AudioPlayer({ songId, canEdit, onRemoved, tuneOverride, 
   };
 
   if (loadError) return <Text color="red.600" fontSize="sm">{loadError}</Text>;
+
+  if (!activated) {
+    return (
+      <Flex align="center" gap={2}>
+        <Button
+          size="xs"
+          variant="outline"
+          colorPalette="brand"
+          onClick={() => {
+            autoPlay.current = true;
+            setActivated(true);
+          }}
+          aria-label="Play along"
+        >
+          <Play size={14} />
+        </Button>
+        <Music2 size={14} />
+        <Text fontSize="sm" color="gray.600">
+          Play along
+        </Text>
+      </Flex>
+    );
+  }
+
   if (!track) return <Spinner size="sm" />;
 
   const progress = player.duration ? (player.position / player.duration) * 100 : 0;
@@ -186,8 +251,24 @@ export default function AudioPlayer({ songId, canEdit, onRemoved, tuneOverride, 
             <Plus size={12} />
           </Button>
           {semitones !== 0 && (
-            <Button size="xs" variant="ghost" onClick={() => setSemitones(0)} aria-label="Back to original pitch">
+            <Button size="xs" variant="ghost" onClick={resetPitch} aria-label="Back to original pitch">
               <RotateCcw size={12} />
+            </Button>
+          )}
+          {onPitchDelta && (
+            <Button
+              size="xs"
+              variant={linked ? 'subtle' : 'ghost'}
+              colorPalette={linked ? 'brand' : 'gray'}
+              onClick={() => setLinked((v) => !v)}
+              title={
+                linked
+                  ? 'Chart key follows pitch changes — click to unlink'
+                  : 'Link the chart key to pitch changes: +1 semitone also moves the chords up one'
+              }
+              aria-label={linked ? 'Unlink chart key from pitch' : 'Link chart key to pitch'}
+            >
+              {linked ? <Link2 size={12} /> : <Link2Off size={12} />}
             </Button>
           )}
           {dirty && (

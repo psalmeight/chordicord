@@ -208,41 +208,6 @@ func GetAudio(database *sqlx.DB, store *storage.Client) gin.HandlerFunc {
 	}
 }
 
-// maxTuneShift bounds a saved pitch offset. Past an octave the shift is more
-// re-recording than reference, and the artefacts make it useless as a guide.
-const maxTuneShift = 12
-
-// UpdateAudioTune saves the reference track's pitch offset so every viewer,
-// and any setlist that doesn't override it, plays along at the same pitch.
-func UpdateAudioTune(database *sqlx.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var body struct {
-			TuneOffset int `json:"tuneOffset"`
-		}
-		if err := c.ShouldBindJSON(&body); err != nil {
-			c.JSON(400, gin.H{"error": "Invalid request"})
-			return
-		}
-		if body.TuneOffset < -maxTuneShift || body.TuneOffset > maxTuneShift {
-			c.JSON(400, gin.H{"error": "Tune offset is out of range"})
-			return
-		}
-
-		res, err := database.Exec(
-			`UPDATE song_audio SET tune_offset = $1 WHERE song_id = $2`,
-			body.TuneOffset, c.Param("id"))
-		if err != nil {
-			c.JSON(500, gin.H{"error": "Failed to save the tune"})
-			return
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			c.JSON(404, gin.H{"error": "No audio for this song"})
-			return
-		}
-		c.JSON(200, gin.H{"ok": true, "tuneOffset": body.TuneOffset})
-	}
-}
-
 // DeleteAudio frees a slot. The row goes first: if the storage delete fails we
 // have an orphaned object (recoverable, costs a little space) rather than a row
 // pointing at a file that's gone (breaks playback for everyone).

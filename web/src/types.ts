@@ -20,6 +20,8 @@ export interface Song {
   noteCards: NoteCard[];
   tags: string[];
   content: string;
+  /** How many columns the chart renders in (1 or 2). */
+  chartColumns: number;
   createdBy: string | null;
   updatedBy: string | null;
   updatedByName: string | null;
@@ -68,10 +70,15 @@ export interface Setlist {
   updatedAt: string;
 }
 
+/** A setlist item owns a snapshot copy of its song, taken when it was added.
+ *  title..noteCards are the item's own — editing them never touches the
+ *  songbank, and songbank edits only arrive via an explicit re-sync. */
 export interface SetlistItem {
   id: string;
   setlistId: string;
-  songId: string;
+  /** The songbank song this was copied from — the audio link and re-sync
+   *  source. null once the songbank song has been deleted. */
+  songId: string | null;
   position: number;
   keyOverride: string | null;
   /** Per-setlist tune override; null falls back to audioTuneOffset. */
@@ -85,8 +92,14 @@ export interface SetlistItem {
   feel: string;
   content: string;
   noteCards: NoteCard[];
+  /** How many columns the chart renders in (1 or 2) — part of the snapshot. */
+  chartColumns: number;
   /** Whether the song has a reference recording to play along with. */
   hasAudio: boolean;
   /** The recording's own saved tune — the fallback when tuneOffset is null. */
   audioTuneOffset: number;
+  /** Your own capo for this item — private to your account. */
+  myCapo: number;
+  /** Your own note for this item — private to your account. */
+  myNotes: string;
 }

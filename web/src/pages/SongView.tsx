@@ -250,7 +250,8 @@ export default function SongView() {
         )}
       </Box>
 
-      {/* Reference track. Its pitch offset is a saved, chart-independent tune. */}
+      {/* Reference track. Pitch here is preview-only — the saved, shared tune
+          belongs to each setlist item, not the songbank recording. */}
       {(hasAudio || canEdit(user)) && (
         <Box bg="white" p={4} borderRadius="lg" borderWidth="1px" className="no-print">
           {hasAudio ? (
@@ -260,9 +261,6 @@ export default function SongView() {
                 songId={song.id}
                 canEdit={canEdit(user)}
                 onRemoved={() => setHasAudio(false)}
-                onSaveTune={async (semitones) => {
-                  await api.patch(`/api/songs/${song.id}/audio`, { tuneOffset: semitones });
-                }}
               />
               {canEdit(user) && (
                 <AudioUpload
@@ -294,6 +292,7 @@ export default function SongView() {
             fontSize={fontSize}
             showChords={showChords}
             sectionNotes={notes.bySection}
+            columns={song.chartColumns}
           />
         ) : (
           <Text color="gray.500">No lyrics or chords yet.</Text>

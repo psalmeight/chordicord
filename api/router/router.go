@@ -61,10 +61,10 @@ func New(database *sqlx.DB, cfg *config.Config) *gin.Engine {
 	songs.PATCH("/:id", editors, handlers.UpdateSong(database))
 	songs.DELETE("/:id", editors, handlers.DeleteSong(database, store))
 	// Reference tracks. Everyone plays along; only editors attach or remove.
+	// Pitch tuning is saved per setlist item, never on the recording itself.
 	songs.GET("/:id/audio", handlers.GetAudio(database, store))
 	songs.POST("/:id/audio/upload-url", editors, handlers.CreateAudioUploadURL(database, store, cfg))
 	songs.POST("/:id/audio", editors, handlers.ConfirmAudio(database, store, cfg))
-	songs.PATCH("/:id/audio", editors, handlers.UpdateAudioTune(database))
 	songs.DELETE("/:id/audio", editors, handlers.DeleteAudio(database, store))
 
 	// Library-wide audio usage, for the "you're at the limit" manager.
@@ -80,6 +80,10 @@ func New(database *sqlx.DB, cfg *config.Config) *gin.Engine {
 	setlists.POST("/:id/items", editors, handlers.AddSetlistItem(database))
 	setlists.PATCH("/:id/items/:itemId", editors, handlers.UpdateSetlistItem(database))
 	setlists.DELETE("/:id/items/:itemId", editors, handlers.DeleteSetlistItem(database))
+	setlists.POST("/:id/items/:itemId/resync", editors, handlers.ResyncSetlistItem(database))
+	// Personal prefs (capo, private note) — deliberately NOT editors-only:
+	// every member writes their own row and nobody else's.
+	setlists.PUT("/:id/items/:itemId/prefs", handlers.UpsertItemPrefs(database))
 	setlists.POST("/:id/reorder", editors, handlers.ReorderSetlist(database))
 
 	users := r.Group("/api/users")

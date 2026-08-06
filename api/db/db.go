@@ -133,6 +133,65 @@ func Migrate(database *sqlx.DB) {
 		    SET note_cards = jsonb_build_array(jsonb_build_object('color', 'amber', 'text', notes, 'section', '')),
 		        notes = ''
 		  WHERE note_cards = '[]'::jsonb AND btrim(notes) <> '';`,
+
+		// Setlist items own a snapshot copy of the song taken when it was added.
+		// Editing the copy never touches the songbank, and songbank edits never
+		// leak into existing setlists (an explicit re-sync re-pulls them).
+		`ALTER TABLE setlist_items ADD COLUMN IF NOT EXISTS title varchar(255) NOT NULL DEFAULT '';`,
+		`ALTER TABLE setlist_items ADD COLUMN IF NOT EXISTS artist varchar(255) NOT NULL DEFAULT '';`,
+		`ALTER TABLE setlist_items ADD COLUMN IF NOT EXISTS song_key varchar(12);`,
+		`ALTER TABLE setlist_items ADD COLUMN IF NOT EXISTS time_signature varchar(12) NOT NULL DEFAULT '4/4';`,
+		`ALTER TABLE setlist_items ADD COLUMN IF NOT EXISTS tempo integer;`,
+		`ALTER TABLE setlist_items ADD COLUMN IF NOT EXISTS feel varchar(64) NOT NULL DEFAULT '';`,
+		`ALTER TABLE setlist_items ADD COLUMN IF NOT EXISTS content text NOT NULL DEFAULT '';`,
+		`ALTER TABLE setlist_items ADD COLUMN IF NOT EXISTS note_cards jsonb NOT NULL DEFAULT '[]'::jsonb;`,
+
+		// One-shot backfill of pre-snapshot rows. title = '' marks a row that has
+		// never been snapshotted (song titles can't be empty), so this stops
+		// matching after the first run.
+		`UPDATE setlist_items i
+		    SET title = s.title, artist = s.artist, song_key = s.song_key,
+		        time_signature = s.time_signature, tempo = s.tempo, feel = s.feel,
+		        content = s.content, note_cards = s.note_cards
+		   FROM songs s
+		  WHERE s.id = i.song_id AND i.title = '';`,
+
+		// Items used to die with their songbank song (ON DELETE CASCADE). Now the
+		// snapshot must survive deletion, so the FK becomes SET NULL. The lookup
+		// by confdeltype makes this a one-shot regardless of the constraint's
+		// auto-generated name, and a no-op on databases created from schema.sql.
+		`DO $$
+		DECLARE con text;
+		BEGIN
+			SELECT conname INTO con FROM pg_constraint
+			 WHERE conrelid = 'setlist_items'::regclass
+			   AND confrelid = 'songs'::regclass
+			   AND contype = 'f' AND confdeltype = 'c';
+			IF con IS NOT NULL THEN
+				EXECUTE format('ALTER TABLE setlist_items DROP CONSTRAINT %I', con);
+				ALTER TABLE setlist_items
+					ADD CONSTRAINT setlist_items_song_id_fkey
+					FOREIGN KEY (song_id) REFERENCES songs(id) ON DELETE SET NULL;
+			END IF;
+		END $$;`,
+		`ALTER TABLE setlist_items ALTER COLUMN song_id DROP NOT NULL;`,
+
+		// How many columns the chart renders in (1 or 2). A songbank choice,
+		// snapshotted into setlist items like every other chart field.
+		`ALTER TABLE songs ADD COLUMN IF NOT EXISTS chart_columns smallint NOT NULL DEFAULT 1;`,
+		`ALTER TABLE setlist_items ADD COLUMN IF NOT EXISTS chart_columns smallint NOT NULL DEFAULT 1;`,
+
+		// Per-user, per-item preferences: capo shapes and a private note. Each
+		// account sees only its own row; nothing here is shared with the team.
+		`CREATE TABLE IF NOT EXISTS setlist_item_prefs (
+			setlist_item_id uuid NOT NULL REFERENCES setlist_items(id) ON DELETE CASCADE,
+			user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			capo smallint NOT NULL DEFAULT 0,
+			notes text NOT NULL DEFAULT '',
+			updated_at timestamp DEFAULT now() NOT NULL,
+			PRIMARY KEY (setlist_item_id, user_id)
+		);`,
+		`CREATE INDEX IF NOT EXISTS setlist_item_prefs_user_idx ON setlist_item_prefs (user_id);`,
 	}
 
 	for _, s := range stmts {

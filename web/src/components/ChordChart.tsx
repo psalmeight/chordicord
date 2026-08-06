@@ -1,5 +1,5 @@
 import { Box, Text } from '@chakra-ui/react';
-import { Fragment, useMemo } from 'react';
+import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { lyricRuns, parseSong, transposeSong, type Line } from '@/lib/chordpro';
 import { sectionKey } from '@/lib/noteColors';
 import { NoteCardList } from '@/components/NoteCardView';
@@ -13,6 +13,9 @@ const NOTE_STYLE = { color: 'red.600', fontStyle: 'italic', fontWeight: 'bold' }
  *  height a line of text would have taken. */
 const LINE_HEIGHT = 1.35;
 
+/** Space between the two columns when the chart splits. */
+const COLUMN_GAP = '2.5rem';
+
 interface Props {
   content: string;
   /** The key the stored content is written in. */
@@ -24,6 +27,9 @@ interface Props {
   /** Note cards keyed by section (via sectionKey). Rendered under the first
    *  occurrence of the matching section header. */
   sectionNotes?: Record<string, NoteCard[]>;
+  /** How many columns to flow the chart into. 2 still falls back to a single
+   *  column whenever two full-width columns don't fit. Defaults to 1. */
+  columns?: number;
 }
 
 /**
@@ -31,38 +37,108 @@ interface Props {
  *
  * Each chord+lyric pair is an inline-block column: the chord occupies its own
  * line above the lyric, so nothing reflows when a chord name gets wider (G ->
- * F#m7). Column-per-syllable is what keeps alignment correct across wrapping,
- * which a whitespace-padded monospace approach can't do.
+ * F#m7).
+ *
+ * Lines never soft-wrap: the chart renders at its natural width (the longest
+ * line) so chord positioning and lyric width are exactly as written. That
+ * width, measured live, drives the layout — a chart set to two columns flows
+ * into two only when the container fits both side by side, and on anything
+ * narrower it falls back to one (scrolling sideways if even one column
+ * doesn't fit, rather than ever wrapping a line).
  */
 export default function ChordChart({
-  content, fromKey, toKey, fontSize = 15, showChords = true, sectionNotes,
+  content, fromKey, toKey, fontSize = 15, showChords = true, sectionNotes, columns = 1,
 }: Props) {
   const song = useMemo(
     () => transposeSong(parseSong(content), fromKey, toKey),
     [content, fromKey, toKey],
   );
 
+  // A chords line and the lyric line under it — and a section header and its
+  // note cards — render as one unbreakable block, so a column break can never
+  // strand chords at the foot of one column with their lyrics atop the next.
+  const blocks = useMemo(() => {
+    const out: Line[][] = [];
+    for (let i = 0; i < song.lines.length; i++) {
+      const line = song.lines[i];
+      const next = song.lines[i + 1];
+      if (line.type === 'chords' && next?.type === 'lyrics') {
+        out.push([line, next]);
+        i++;
+      } else {
+        out.push([line]);
+      }
+    }
+    return out;
+  }, [song]);
+
+  // The natural width of the longest line, kept current by a ResizeObserver —
+  // it moves when the font size changes and again when a chart font finishes
+  // loading. Read from the FIRST fragment rect, never getBoundingClientRect:
+  // once the chart is in two columns the wrapper is fragmented across both,
+  // and the bounding rect is their union (~double the true width). Feeding
+  // that back in collapses the columns, which re-measures narrow, which
+  // splits them again — an endless flicker. A single fragment always has the
+  // wrapper's real max-content width, in one column or two.
+  const innerRef = useRef<HTMLDivElement>(null);
+  const [lineWidth, setLineWidth] = useState(0);
+  useLayoutEffect(() => {
+    const el = innerRef.current;
+    if (!el) return;
+    const measure = () => {
+      const rect = el.getClientRects()[0];
+      if (rect) setLineWidth(Math.ceil(rect.width));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // A section's notes render under its first appearance only, so a chart that
   // repeats "{Chorus}" doesn't stamp the same note three times.
   const shown = new Set<string>();
 
   return (
-    <Box className="chart" fontSize={`${fontSize}px`} lineHeight={LINE_HEIGHT}>
-      {song.lines.map((line, i) => {
-        const out = [<ChartLine key={i} line={line} showChords={showChords} />];
-        if (line.type === 'section' && sectionNotes) {
-          const k = sectionKey(line.name);
-          if (!shown.has(k) && sectionNotes[k]?.length) {
-            shown.add(k);
-            out.push(
-              <Box key={`notes-${i}`} my={2}>
-                <NoteCardList cards={sectionNotes[k]} />
-              </Box>,
-            );
+    <Box
+      className="chart"
+      fontSize={`${fontSize}px`}
+      lineHeight={LINE_HEIGHT}
+      overflowX="auto"
+      style={
+        columns === 2 && lineWidth > 0
+          ? { columnCount: 2, columnWidth: `${lineWidth}px`, columnGap: COLUMN_GAP }
+          : undefined
+      }
+    >
+      <Box ref={innerRef} width="max-content" maxWidth="none">
+        {blocks.map((block, i) => {
+          const section = block[0].type === 'section' ? block[0] : null;
+          let notes: NoteCard[] | null = null;
+          if (section && sectionNotes) {
+            const k = sectionKey(section.name);
+            if (!shown.has(k) && sectionNotes[k]?.length) {
+              shown.add(k);
+              notes = sectionNotes[k];
+            }
           }
-        }
-        return out;
-      })}
+          return (
+            <Box key={i} style={{ breakInside: 'avoid' }}>
+              {block.map((line, j) => (
+                <ChartLine key={j} line={line} showChords={showChords} />
+              ))}
+              {notes && (
+                // width 0 + minWidth 100%: the cards span the chart without
+                // their text counting towards the max-content measurement —
+                // otherwise a wordy note would widen every column.
+                <Box my={2} width="0" minWidth="100%">
+                  <NoteCardList cards={notes} />
+                </Box>
+              )}
+            </Box>
+          );
+        })}
+      </Box>
     </Box>
   );
 }
@@ -87,6 +163,14 @@ function ChartLine({ line, showChords }: { line: Line; showChords: boolean }) {
         </Text>
       );
 
+    case 'heading':
+      // "## text" and "### text" — oversized lines for titles and callouts.
+      return (
+        <Text mt={2} mb={1} fontWeight="bold" fontSize={line.level === 2 ? '1.5em' : '1.25em'}>
+          {line.text}
+        </Text>
+      );
+
     case 'chords':
       if (!showChords) return null;
       return (
@@ -101,11 +185,17 @@ function ChartLine({ line, showChords }: { line: Line; showChords: boolean }) {
 
     case 'lyrics': {
       const runs = lyricRuns(line.pairs);
+      // A line with no chords at all gets no chord row: reserving the empty
+      // slot anyway pushes chord-less lyrics a full line away from whatever
+      // sits above them (a bar chart, a section header). The PDF renderer
+      // makes the same call in drawCellRow. Every lyric line still keeps a
+      // small bottom margin so the next chord row never sits flush under it.
+      const anyChord = line.pairs.some((p) => p.chord);
       return (
-        <Box whiteSpace="pre-wrap" mb={showChords ? 1 : 0}>
+        <Box whiteSpace="pre-wrap" mb={showChords ? 1.5 : 0}>
           {line.pairs.map((pair, i) => (
             <Box key={i} display="inline-block" verticalAlign="bottom" whiteSpace="pre">
-              {showChords && (
+              {showChords && anyChord && (
                 <Box
                   height="1.3em"
                   fontWeight="bold"
