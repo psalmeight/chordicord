@@ -13,8 +13,8 @@
 
 import { jsPDF } from 'jspdf';
 import {
-  lyricRuns, parseSong, punctRuns, transposeSong,
-  type HeadingLevel, type Line, type TextRun,
+  isMarked, lyricRuns, markRuns, parseSong, punctRuns, transposeSong,
+  type HeadingLevel, type Line, type Marked, type TextRun,
 } from './chordpro';
 import { sectionKey } from './noteColors';
 import type { NoteCard } from '@/types';
@@ -192,6 +192,8 @@ function drawNoteCards(ctx: Ctx, cards: NoteCard[], size: number) {
 interface Cell {
   chord: string;
   chordNote: boolean;
+  /** Marked in any way, so it prints red — a note or a blinking chord. */
+  chordMarked: boolean;
   runs: TextRun[];
   width: number;
   chordWidth: number;
@@ -205,6 +207,32 @@ const HEADING_SCALE: Record<HeadingLevel, number> = { 2: 1.5, 3: 1.25, 4: 1.08 }
 const CHORD_PAD = 5;
 /** Gap between tokens on a bar-chart row. */
 const TOKEN_GAP = 9;
+
+/** What a chord slot actually shows. A bracketed bar phrase arrives with its
+ *  marks still spelled out — "| D | ^^G^^ |" — and the delimiters are never
+ *  drawn, so every measurement has to be taken without them. */
+const slotText = (text: string) => markRuns(text).map((r) => r.text).join('');
+
+/**
+ * Draws a chord slot: marked stretches in red, the rest in `ink` with its
+ * structural punctuation faded.
+ *
+ * Paper can't blink, so a ^^blinking^^ chord prints as a red one — the same
+ * fallback a red note gets, and the same thing it means on screen: look here.
+ */
+function drawSlot(ctx: Ctx, text: string, x: number, y: number, ink: string, faint: string) {
+  let cx = x;
+  for (const run of markRuns(text)) {
+    if (isMarked(run)) {
+      ctx.doc.setTextColor(RED);
+      ctx.doc.text(safe(run.text), cx, y);
+    } else {
+      drawFaded(ctx, run.text, cx, y, ink, faint);
+    }
+    cx += widthOf(ctx, run.text);
+  }
+  ctx.doc.setTextColor(ink);
+}
 
 function runsWidth(ctx: Ctx, runs: TextRun[], size: number): number {
   let w = 0;
@@ -226,12 +254,15 @@ function lyricCells(ctx: Ctx, line: Extract<Line, { type: 'lyrics' }>, size: num
   const runs = lyricRuns(line.pairs);
   const cells: Cell[] = [];
 
-  const push = (chord: string, chordNote: boolean, text: TextRun[]) => {
-    style(ctx, chordSize, chordNote ? 'bolditalic' : 'bold', BLUE);
-    const chordWidth = chord ? widthOf(ctx, chord) + CHORD_PAD : 0;
+  const push = (chord: string, mark: Marked, text: TextRun[]) => {
+    style(ctx, chordSize, mark.note ? 'bolditalic' : 'bold', BLUE);
+    // Measured on what will be drawn, never on the source: a slot carrying
+    // "^^G^^" shows one character, not five.
+    const chordWidth = chord ? widthOf(ctx, slotText(chord)) + CHORD_PAD : 0;
     cells.push({
       chord,
-      chordNote,
+      chordNote: !!mark.note,
+      chordMarked: isMarked(mark),
       runs: text,
       chordWidth,
       width: Math.max(chordWidth, runsWidth(ctx, text, size)),
@@ -241,14 +272,14 @@ function lyricCells(ctx: Ctx, line: Extract<Line, { type: 'lyrics' }>, size: num
   line.pairs.forEach((pair, i) => {
     const text = runs[i];
     if (pair.chord) {
-      push(pair.chord, !!pair.note, text);
+      push(pair.chord, pair, text);
       return;
     }
     // Words keep their trailing space, so the gap between them survives the
     // split and the line reads exactly as written.
     for (const run of text) {
       for (const word of run.text.match(/\S+\s*|\s+/g) ?? []) {
-        push('', false, [{ text: word, note: run.note }]);
+        push('', {}, [{ text: word, note: run.note }]);
       }
     }
   });
@@ -266,10 +297,11 @@ function drawCellRow(ctx: Ctx, row: Cell[], size: number, chordSize: number, sho
   let x = MARGIN.left;
   for (const cell of row) {
     if (hasChord && cell.chord) {
-      style(ctx, chordSize, cell.chordNote ? 'bolditalic' : 'bold', cell.chordNote ? RED : BLUE);
+      const ink = cell.chordMarked ? RED : BLUE;
+      style(ctx, chordSize, cell.chordNote ? 'bolditalic' : 'bold', ink);
       // A note is prose — its own brackets are part of what it says.
       if (cell.chordNote) ctx.doc.text(safe(cell.chord), x, baseline(ctx.y, chordSize));
-      else drawFaded(ctx, cell.chord, x, baseline(ctx.y, chordSize), BLUE, BLUE_FAINT);
+      else drawSlot(ctx, cell.chord, x, baseline(ctx.y, chordSize), ink, cell.chordMarked ? ink : BLUE_FAINT);
     }
     let lx = x;
     for (const run of cell.runs) {
@@ -312,16 +344,20 @@ function drawChordLine(ctx: Ctx, line: Extract<Line, { type: 'chords' }>, chordS
   ensure(ctx, lineH);
 
   for (const token of line.chords) {
-    style(ctx, chordSize, token.note ? 'bolditalic' : 'bold', token.note ? RED : BLUE);
-    const w = widthOf(ctx, token.text);
+    const ink = isMarked(token) ? RED : BLUE;
+    const setFont = () => style(ctx, chordSize, token.note ? 'bolditalic' : 'bold', ink);
+    setFont();
+    // Measured on what will be drawn: a phrase carrying "^^G^^" loses four
+    // characters between here and the page, and the wrap test has to know.
+    const w = widthOf(ctx, slotText(token.text));
     if (x > MARGIN.left && x + w > MARGIN.left + CONTENT_W) {
       ctx.y += lineH;
       ensure(ctx, lineH);
       x = MARGIN.left;
-      style(ctx, chordSize, token.note ? 'bolditalic' : 'bold', token.note ? RED : BLUE);
+      setFont();
     }
     if (token.note) ctx.doc.text(safe(token.text), x, baseline(ctx.y, chordSize));
-    else drawFaded(ctx, token.text, x, baseline(ctx.y, chordSize), BLUE, BLUE_FAINT);
+    else drawSlot(ctx, token.text, x, baseline(ctx.y, chordSize), ink, ink === RED ? ink : BLUE_FAINT);
     x += w + TOKEN_GAP;
   }
   ctx.y += lineH;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { capoKey, parseChord, signedSemitones, transposeChord, transposeChordToKey } from './chords';
 import {
-  hasChords, hasInlineChords, lyricRuns, parseSong, punctRuns, toAligned, toChordPro,
+  hasChords, hasInlineChords, lyricRuns, markRuns, parseSong, punctRuns, toAligned, toChordPro,
   transposeContent, transposeSong,
 } from './chordpro';
 
@@ -521,6 +521,70 @@ describe('^^blinking cues^^', () => {
     expect(transposeContent('[C]Amazing ^^G is next^^ grace', 'C', 'D')).toBe(
       '[D]Amazing ^^G is next^^ grace',
     );
+  });
+
+  it('leaves a chord a chord — blinking, but still played and transposed', () => {
+    expect(parseSong('G ^^C^^ D').lines[0]).toEqual({
+      type: 'chords',
+      chords: [
+        { text: 'G', note: false },
+        { text: 'C', note: false, blink: true },
+        { text: 'D', note: false },
+      ],
+    });
+    // The bug this guards: a stale C left blinking beside transposed neighbours.
+    expect(toChordPro(transposeSong(parseSong('G ^^C^^ D'), 'C', 'D'))).toBe('A ^^D^^ E');
+  });
+
+  it('moves a blinking chord in every spelling it can be written in', () => {
+    expect(transposeContent('^^G^^', 'C', 'D')).toBe('^^A^^');
+    expect(transposeContent('| G | ^^C^^ |', 'C', 'D')).toBe('| A | ^^D^^ |');
+    expect(transposeContent('[^^G^^]Amazing', 'C', 'D')).toBe('[^^A^^]Amazing');
+  });
+
+  it('reads the inline spelling, carets off the chord name', () => {
+    expect(parseSong('[^^G^^]Amazing').lines[0]).toEqual({
+      type: 'lyrics',
+      pairs: [{ chord: 'G', lyric: 'Amazing', blink: true }],
+    });
+  });
+
+  it('counts a blinking chord among the chords, unlike a note', () => {
+    expect(hasChords('^^G^^')).toBe(true);
+    expect(hasChords('*G*')).toBe(false);
+  });
+
+  it('only calls it a chord when it actually parses as one', () => {
+    // Cue words that merely start with a note letter stay prose, or they'd be
+    // transposed into nonsense: "Build" is not a B chord.
+    for (const word of ['Build', 'Bass', 'Drums', 'Ease', 'Go']) {
+      const line = parseSong(`^^${word}^^`).lines[0];
+      expect(line.type === 'chords' && line.chords[0].note, word).toBe(true);
+    }
+  });
+
+  it('is found inside a bracketed bar phrase, which arrives as one token', () => {
+    // "[| D | ^^G^^ |]" is deliberately kept whole by the tokenizer, so the
+    // marks in it survive as raw text and only the renderer can resolve them.
+    const line = parseSong('[|  D  |  ^^G^^  | Em7 |]').lines[0];
+    expect(line.type).toBe('chords');
+    const phrase = line.type === 'chords' ? line.chords[0].text : '';
+    expect(markRuns(phrase)).toEqual([
+      { text: '|  D  |  ', note: false },
+      { text: 'G', note: false, blink: true },
+      { text: '  | Em7 |', note: false },
+    ]);
+    // Whatever splits it must not lose or invent a character.
+    expect(markRuns(phrase).map((r) => r.text).join('')).toBe('|  D  |  G  | Em7 |');
+  });
+
+  it('transposes a blinking chord inside a bar phrase along with its neighbours', () => {
+    // The bug this guards: D and Em7 move, ^^G^^ silently does not.
+    const source = '[|  D  |  ^^G^^  | Em7 |]';
+    expect(toChordPro(transposeSong(parseSong(source), 'D', 'E'))).toBe(
+      '|  E  |  ^^A^^  | F#m7 |',
+    );
+    expect(transposeContent(source, 'D', 'E')).toBe('[|  E  |  ^^A^^  | F#m7 |]');
   });
 
   it('leaves a lone or unclosed caret as literal text', () => {

@@ -32,6 +32,11 @@ export const RULES: { source: string; caption: string; hidden?: boolean }[] = [
       'Double carets do the same, but the cue blinks — for the one you have to catch mid-song. Goes anywhere asterisks do.',
   },
   {
+    source: 'G  ^^C^^  D',
+    caption:
+      'Put them round a chord and it blinks too, while staying a chord: it still transposes with the rest.',
+  },
+  {
     source: '{Verse 1}',
     caption: 'A section header.',
   },

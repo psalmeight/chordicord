@@ -66,6 +66,13 @@ describe('chart syntax guide', () => {
     expect(lines.map((l) => (l.type === 'heading' ? l.level : 0))).toEqual([2, 3, 4]);
   });
 
+  it('keeps the blinking-chord example a chord, as its caption promises', () => {
+    const line = rule('G  ^^C^^  D')[0];
+    expect(line.type).toBe('chords');
+    const marked = (line.type === 'chords' ? line.chords : []).find((t) => t.blink);
+    expect(marked).toEqual({ text: 'C', note: false, blink: true });
+  });
+
   it('renders the blink example as a blinking cue, not literal carets', () => {
     const line = rule('Amazing ^^watch me^^ grace')[0];
     expect(line.type).toBe('lyrics');

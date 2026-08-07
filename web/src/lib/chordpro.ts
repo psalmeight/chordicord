@@ -32,14 +32,19 @@
 import { parseChord, transposeChordToKey } from './chords';
 
 /**
- * `note` means the text was marked up by the author — *a note* or a ^^blinking
- * cue^^ — rather than being a chord. The two are structurally identical:
- * neither is played, neither is transposed, neither counts as evidence that a
- * line is a chord row. Only the renderers tell them apart, via `blink`, so
- * every "is this a chord?" test in here can go on asking `!note` alone.
+ * `note` means the text is the author talking — an aside, never played, never
+ * transposed, never evidence that a line is a chord row. Every "is this a
+ * chord?" test in here asks `!note` alone.
  *
- * `blink` is set only when true, never to false, so a plain token still deep-
- * equals the shape it had before blinking existed.
+ * `blink` is emphasis, and orthogonal: it says how the text is drawn, not what
+ * it is. *Asterisks* always mean prose, but ^^carets^^ only make something
+ * blink — so ^^G^^ is the chord G, still transposed with everything else,
+ * while ^^watch me^^ is prose that happens to flash. What decides is whether
+ * the marked text parses as a chord, which is the same question the chord-row
+ * patterns already ask of everything else on the line.
+ *
+ * Both flags are set only when true, never to false, so a plain token still
+ * deep-equals the shape it had before any of this existed.
  */
 export interface Marked {
   note?: boolean;
@@ -103,6 +108,46 @@ function markOf(raw: string): Marked | null {
 
 /** Strips a mark's delimiters off the text it wraps. */
 const unwrap = (raw: string, mark: Marked) => raw.slice(mark.blink ? 2 : 1, mark.blink ? -2 : -1);
+
+/** Whether a mark wraps a chord rather than prose — true only for ^^carets^^,
+ *  which are emphasis and leave what they wrap a chord. */
+const marksAChord = (mark: Marked, text: string) => Boolean(mark.blink) && Boolean(parseChord(text));
+
+/** Whether this carries a mark at all, and so has to be written back out with
+ *  its delimiters. */
+export const isMarked = (m: Marked) => Boolean(m.note || m.blink);
+
+/** A stretch of a chord token's text, flagged with the mark it came from. */
+export interface MarkRun extends Marked {
+  text: string;
+}
+
+/**
+ * Splits arbitrary text into its marked stretches and everything between.
+ *
+ * A chord row is normally tokenised before any renderer sees it, and the marks
+ * fall out on the way. A bracketed bar phrase is the exception: "[| D | ^^G^^
+ * |]" is deliberately kept as a single token carrying a whole run of chords —
+ * transposing it word by word is what lets bars and spacing survive — so
+ * anything marked inside it has to be found late, at the point of drawing.
+ */
+export function markRuns(text: string): MarkRun[] {
+  const out: MarkRun[] = [];
+  const re = scan(MARK_RE);
+  let last = 0;
+  let m: RegExpExecArray | null;
+
+  while ((m = re.exec(text)) !== null) {
+    const mark = markOf(m[0]);
+    if (!mark) continue;
+    if (m.index > last) out.push({ text: text.slice(last, m.index), note: false });
+    const inner = unwrap(m[0], mark);
+    out.push({ text: inner, ...mark, note: !marksAChord(mark, inner) });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ text: text.slice(last), note: false });
+  return out;
+}
 /** One token on a chord row: a mark, a bracketed chord, a bar, or a bare run.
  *  Bars are tokens in their own right so "| G | C |" renders as the notation it
  *  was written as — they used to fall through the tokenizer and vanish, which
@@ -149,10 +194,18 @@ interface Anchored extends ChordToken {
  *  callers. */
 const scan = (re: RegExp) => new RegExp(re.source, 'g');
 
-/** Blanks out marked text, keeping every other column where it was. Lets the
- *  chord patterns above be written without knowing about marks at all. */
+/** Blanks out the author's asides, keeping every other column where it was.
+ *  Lets the chord patterns above be written without knowing about marks at
+ *  all. A ^^blinking chord^^ keeps its name — it is one of the chords those
+ *  patterns are looking for — padded back to the width it occupied so no
+ *  column moves. */
 function stripMarks(line: string): string {
-  return line.replace(scan(MARK_RE), (m) => ' '.repeat(m.length));
+  return line.replace(scan(MARK_RE), (m) => {
+    const mark = markOf(m);
+    const text = mark ? unwrap(m, mark) : '';
+    if (mark && marksAChord(mark, text)) return text + ' '.repeat(m.length - text.length);
+    return ' '.repeat(m.length);
+  });
 }
 
 type LineKind =
@@ -233,7 +286,8 @@ function chordTokens(line: string): Anchored[] {
     const raw = match[0];
     const mark = markOf(raw);
     if (mark) {
-      out.push({ text: unwrap(raw, mark), note: true, ...mark, col: match.index });
+      const text = unwrap(raw, mark);
+      out.push({ text, ...mark, note: !marksAChord(mark, text), col: match.index });
       continue;
     }
     const text = match[1] ?? raw;
@@ -277,11 +331,12 @@ function anchorToLyric(chords: Anchored[], lyric: string): ChordPair[] {
   chords.forEach((c, i) => {
     const end = i + 1 < chords.length ? chords[i + 1].col : lyric.length;
     const lyricAt = lyric.slice(c.col, end);
-    pairs.push(
-      c.note
-        ? { chord: c.text, lyric: lyricAt, note: true, ...(c.blink ? { blink: c.blink } : null) }
-        : { chord: c.text, lyric: lyricAt },
-    );
+    pairs.push({
+      chord: c.text,
+      lyric: lyricAt,
+      ...(c.note ? { note: true } : null),
+      ...(c.blink ? { blink: c.blink } : null),
+    });
   });
 
   return pairs;
@@ -346,19 +401,30 @@ function parseLyricLine(line: string): ChordPair[] {
 
   let lastIndex = 0;
   let pendingChord = '';
+  let pendingMark: Marked | null = null;
   let match: RegExpExecArray | null;
 
   while ((match = re.exec(line)) !== null) {
     const lyric = line.slice(lastIndex, match.index);
-    if (lyric || pendingChord) pairs.push({ chord: pendingChord, lyric });
-    pendingChord = match[1];
+    if (lyric || pendingChord) pairs.push({ chord: pendingChord, lyric, ...pendingMark });
+    [pendingChord, pendingMark] = readChordSlot(match[1]);
     lastIndex = re.lastIndex;
   }
 
   const tail = line.slice(lastIndex);
-  if (tail || pendingChord) pairs.push({ chord: pendingChord, lyric: tail });
+  if (tail || pendingChord) pairs.push({ chord: pendingChord, lyric: tail, ...pendingMark });
 
   return pairs;
+}
+
+/** Reads what's between the brackets of an inline chord. "[^^G^^]" is the
+ *  inline spelling of a blinking chord — without this the marks would survive
+ *  into the chord name and render as a chord literally called "^^G^^". */
+function readChordSlot(raw: string): [string, Marked | null] {
+  const mark = markOf(raw);
+  if (!mark) return [raw, null];
+  const text = unwrap(raw, mark);
+  return marksAChord(mark, text) ? [text, { blink: mark.blink }] : [text, mark];
 }
 
 /** Applies a key change to every chord in a parsed song. */
@@ -369,8 +435,19 @@ export function transposeSong(song: ParsedSong, fromKey: string, toKey: string):
   // "[| D | G | Em7 A |]" — parses as a single token whose text carries the
   // whole run. Transposing word-by-word covers both: bars, spacing and
   // anything that isn't a chord pass through unchanged.
+  //
+  // A ^^blinking chord^^ still wears its carets in there, and they'd stop it
+  // parsing as a chord — leaving the one chord the author flagged as the one
+  // showing a stale value while everything around it moved.
   const tr = (text: string) =>
-    text.replace(/[^\s|]+/g, (token) => transposeChordToKey(token, fromKey, toKey));
+    text.replace(/[^\s|]+/g, (token) => {
+      const mark = markOf(token);
+      if (!mark) return transposeChordToKey(token, fromKey, toKey);
+      const inner = unwrap(token, mark);
+      return marksAChord(mark, inner)
+        ? `^^${transposeChordToKey(inner, fromKey, toKey)}^^`
+        : token;
+    });
 
   return {
     lines: song.lines.map((line) => {
@@ -445,9 +522,15 @@ export function transposeContent(content: string, fromKey: string, toKey: string
       switch (classifyLine(line).kind) {
         case 'lyrics':
           return outsideMarks(line, (part) =>
-            part.replace(/\[([^\]]*)\]/g, (whole, chord: string) =>
-              chord ? `[${transposeChordToKey(chord, fromKey, toKey)}]` : whole,
-            ),
+            part.replace(/\[([^\]]*)\]/g, (whole, chord: string) => {
+              if (!chord) return whole;
+              const mark = markOf(chord);
+              const text = mark ? unwrap(chord, mark) : chord;
+              // Prose in a chord slot stays exactly as typed.
+              if (mark && !marksAChord(mark, text)) return whole;
+              const moved = transposeChordToKey(text, fromKey, toKey);
+              return `[${mark ? `^^${moved}^^` : moved}]`;
+            }),
           );
         case 'chords':
           // Bar charts carry their own structure; replacing token-wise keeps
@@ -488,17 +571,24 @@ function respaceChordLine(line: string, fromKey: string, toKey: string): string 
  *  fit. Marks keep their delimiters so the row reads back the same way. */
 function layOutChords(anchors: Anchored[], bracketed: boolean): string {
   return anchors.reduce((out, a) => {
-    const text = a.note ? rewrap(a) : bracketed ? `[${a.text}]` : a.text;
+    const text = isMarked(a) ? rewrap(a) : bracketed ? `[${a.text}]` : a.text;
     return out + ' '.repeat(Math.max(a.col - out.length, out ? 1 : 0)) + text;
   }, '');
 }
 
 /** Puts a mark's delimiters back on, so what was parsed can be written out
- *  again byte for byte. */
-const rewrap = (m: Marked & { text: string }) => (m.blink ? `^^${m.text}^^` : `*${m.text}*`);
+ *  again byte for byte. Chord slots pass their text separately, since a pair
+ *  keeps it under a different name. */
+const rewrap = (m: Marked & { text?: string }, text = m.text ?? '') =>
+  m.blink ? `^^${text}^^` : m.note ? `*${text}*` : text;
 
 /** Runs `fn` over the stretches of a line that sit outside any mark, so an
- *  aside like "*capo 2, G shapes*" never has its words transposed. */
+ *  aside like "*capo 2, G shapes*" never has its words transposed.
+ *
+ *  A ^^blinking chord^^ is the exception: it is a chord, so it moves with the
+ *  key like any other. Without this a chart transposed on its way to storage
+ *  would keep the old chord inside the carets — still blinking, and now
+ *  wrong. */
 function outsideMarks(line: string, fn: (part: string) => string): string {
   const re = scan(MARK_RE);
   let out = '';
@@ -506,8 +596,17 @@ function outsideMarks(line: string, fn: (part: string) => string): string {
   let match: RegExpExecArray | null;
 
   while ((match = re.exec(line)) !== null) {
-    out += fn(line.slice(at, match.index)) + match[0];
-    at = match.index + match[0].length;
+    const end = match.index + match[0].length;
+    // "[^^G^^]" is a chord slot that happens to be marked, not a mark that
+    // happens to sit in brackets. Splitting here would hand `fn` a bare "["
+    // and hide the slot from it, so the whole thing is left in the plain run
+    // for `fn` to recognise.
+    if (line[match.index - 1] === '[' && line[end] === ']') continue;
+    const mark = markOf(match[0]);
+    const text = mark ? unwrap(match[0], mark) : '';
+    const kept = mark && marksAChord(mark, text) ? `^^${fn(text)}^^` : match[0];
+    out += fn(line.slice(at, match.index)) + kept;
+    at = end;
   }
   return out + fn(line.slice(at));
 }
@@ -649,14 +748,15 @@ export function toChordPro(song: ParsedSong): string {
         case 'heading':
           return `${'#'.repeat(line.level)} ${line.text}`;
         case 'chords':
-          return line.chords.map((t) => (t.note ? rewrap(t) : t.text)).join(' ');
+          return line.chords.map((t) => (isMarked(t) ? rewrap(t) : t.text)).join(' ');
         case 'lyrics':
-          // A mark in the chord slot has no inline spelling — [*hold*] would
+          // A note in the chord slot has no inline spelling — [*hold*] would
           // read back as a chord named "*hold*". Lines carrying one are
-          // written in the two-row form, which can say exactly that.
+          // written in the two-row form, which can say exactly that. A
+          // ^^blinking chord^^ is still a chord, so [^^G^^] reads back fine.
           return line.pairs.some((p) => p.note)
             ? alignPairs(line.pairs).join('\n')
-            : line.pairs.map((p) => (p.chord ? `[${p.chord}]` : '') + p.lyric).join('');
+            : line.pairs.map((p) => (p.chord ? `[${rewrap(p, p.chord)}]` : '') + p.lyric).join('');
         case 'blank':
           return '';
       }

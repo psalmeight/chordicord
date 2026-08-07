@@ -1,7 +1,8 @@
 import { Box, Text } from '@chakra-ui/react';
 import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  lyricRuns, parseSong, punctRuns, transposeSong, type HeadingLevel, type Line,
+  isMarked, lyricRuns, markRuns, parseSong, punctRuns, transposeSong,
+  type HeadingLevel, type Line,
 } from '@/lib/chordpro';
 import { sectionKey } from '@/lib/noteColors';
 import { NoteCardList } from '@/components/NoteCardView';
@@ -40,6 +41,29 @@ function Faded({ text }: { text: string }) {
           </Box>
         ) : (
           <Fragment key={i}>{run.text}</Fragment>
+        ),
+      )}
+    </>
+  );
+}
+
+/**
+ * A chord slot's text: anything marked inside it styled, punctuation faded.
+ *
+ * Most slots hold one chord and arrive with their marks already resolved. A
+ * bracketed bar phrase — "[| D | ^^G^^ |]" — arrives whole, carets and all, so
+ * the marks in it are found here instead.
+ */
+function SlotText({ text }: { text: string }) {
+  return (
+    <>
+      {markRuns(text).map((run, i) =>
+        isMarked(run) ? (
+          <Box as="span" key={i} {...markStyle(run)}>
+            {run.text}
+          </Box>
+        ) : (
+          <Faded key={i} text={run.text} />
         ),
       )}
     </>
@@ -215,8 +239,8 @@ function ChartLine({ line, showChords }: { line: Line; showChords: boolean }) {
         <Box mb={1} fontWeight="bold" color="blue.600">
           {line.chords.map((token, i) => (
             <Box as="span" key={i} pr={3} {...markStyle(token)}>
-              {/* A mark is prose — its own brackets are part of what it says. */}
-              {token.note ? token.text : <Faded text={token.text} />}
+              {/* A note is prose — its own brackets are part of what it says. */}
+              {token.note ? token.text : <SlotText text={token.text} />}
             </Box>
           ))}
         </Box>
@@ -242,7 +266,7 @@ function ChartLine({ line, showChords }: { line: Line; showChords: boolean }) {
                   pr={pair.chord ? 2 : 0}
                   {...markStyle(pair)}
                 >
-                  {pair.note ? pair.chord : <Faded text={pair.chord} />}
+                  {pair.note ? pair.chord : <SlotText text={pair.chord} />}
                 </Box>
               )}
               {/* A chord past the end of the lyric has nothing under it. The

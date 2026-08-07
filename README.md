@@ -72,6 +72,9 @@ That [G]saved a wretch like [D]me
 - `^^watch me^^` is the same, but blinks — for a cue you have to catch
   mid-song. It prints as a plain red cue, and holds still for anyone whose
   system asks for reduced motion.
+- `^^C^^` round a chord blinks it without demoting it: unlike `*C*`, it stays a
+  chord and transposes with everything else. Carets are emphasis, asterisks are
+  prose, and what decides is simply whether the marked text parses as a chord.
 
 The ⓘ button in the bottom-right corner opens the same reference with each rule
 rendered as it will actually appear, on any page.
