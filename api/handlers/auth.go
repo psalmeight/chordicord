@@ -40,19 +40,43 @@ func makeInviteToken(userID, secret string, expiry time.Duration) (string, error
 
 func Login(database *sqlx.DB, secret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// One sign-in field, three spellings on the wire. `identifier` is what
+		// the app sends now; `email` and `username` are accepted so older
+		// clients (and anything scripted against the original API) keep working.
 		var body struct {
-			Email    string `json:"email"`
-			Password string `json:"password"`
+			Identifier string `json:"identifier"`
+			Email      string `json:"email"`
+			Username   string `json:"username"`
+			Password   string `json:"password"`
 		}
-		if err := c.ShouldBindJSON(&body); err != nil || body.Email == "" || body.Password == "" {
-			c.JSON(400, gin.H{"error": "Email and password required"})
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(400, gin.H{"error": "Email or username and password required"})
+			return
+		}
+		identifier := body.Identifier
+		if identifier == "" {
+			identifier = body.Email
+		}
+		if identifier == "" {
+			identifier = body.Username
+		}
+		if identifier == "" || body.Password == "" {
+			c.JSON(400, gin.H{"error": "Email or username and password required"})
 			return
 		}
 
+		// Both columns are stored lowercased, so one normalised value matches
+		// either. Accounts with no username are unaffected — NULL = $1 is never
+		// true. Nothing here validates that an address contains '@', so two
+		// rows *can* match: one person's username colliding with another's
+		// unusual email. Email wins that tie explicitly rather than by whatever
+		// order the planner happens to return, which would otherwise lock one
+		// of the two out at random.
 		var user models.User
 		err := database.Get(&user,
-			`SELECT id, email, password_hash, name, role, verified_at, created_at, updated_at
-			 FROM users WHERE email = $1`, normalizeEmail(body.Email))
+			`SELECT id, email, username, password_hash, name, role, verified_at, created_at, updated_at
+			 FROM users WHERE email = $1 OR username = $1
+			 ORDER BY (email = $1) DESC LIMIT 1`, normalizeEmail(identifier))
 		if err != nil {
 			c.JSON(401, gin.H{"error": "Invalid credentials"})
 			return
@@ -127,7 +151,7 @@ func AcceptInvite(database *sqlx.DB, cfg *config.Config) gin.HandlerFunc {
 		err = database.Get(&user,
 			`UPDATE users SET password_hash = $1, verified_at = NOW(), updated_at = NOW()
 			 WHERE id = $2
-			 RETURNING id, email, password_hash, name, role, verified_at, created_at, updated_at`,
+			 RETURNING id, email, username, password_hash, name, role, verified_at, created_at, updated_at`,
 			string(hash), userID)
 		if err != nil {
 			c.JSON(400, gin.H{"error": "Invite link is invalid or has expired"})

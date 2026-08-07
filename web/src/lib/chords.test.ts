@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { capoKey, parseChord, signedSemitones, transposeChord, transposeChordToKey } from './chords';
 import {
-  hasChords, hasInlineChords, lyricRuns, parseSong, toAligned, toChordPro, transposeContent,
-  transposeSong,
+  hasChords, hasInlineChords, lyricRuns, parseSong, punctRuns, toAligned, toChordPro,
+  transposeContent, transposeSong,
 } from './chordpro';
 
 /** A chord row of plain chords, the shape parseSong produces. */
@@ -115,8 +115,10 @@ describe('parseSong', () => {
     expect(parseSong('Chorus:').lines[0]).toEqual({ type: 'section', name: 'Chorus' });
   });
 
-  it('recognises chord-only lines', () => {
-    expect(parseSong('| G | Em7 | C |').lines[0]).toEqual(row('G', 'Em7', 'C'));
+  it('recognises chord-only lines, bars and all', () => {
+    expect(parseSong('| G | Em7 | C |').lines[0]).toEqual(
+      row('|', 'G', '|', 'Em7', '|', 'C', '|'),
+    );
   });
 
   it('reads ## and ### as heading lines, and a single # as a comment', () => {
@@ -176,7 +178,7 @@ describe('parseSong with chords written above the lyric', () => {
   it('keeps a bar chart standalone rather than eating the lyric under it', () => {
     const song = parseSong(['| G | C |', 'Amazing grace'].join('\n'));
     expect(song.lines).toEqual([
-      row('G', 'C'),
+      row('|', 'G', '|', 'C', '|'),
       { type: 'lyrics', pairs: [{ chord: '', lyric: 'Amazing grace' }] },
     ]);
   });
@@ -238,10 +240,12 @@ describe('implied chords in parens', () => {
       type: 'chords',
       chords: [
         { text: '(C)', note: false },
+        { text: '|', note: false },
         { text: 'Bm7', note: false },
         { text: 'Bm/E', note: false },
         { text: 'Am7', note: false },
         { text: 'Am7/D', note: false },
+        { text: '|', note: false },
       ],
     });
   });
@@ -354,8 +358,11 @@ describe('notes written *like this*', () => {
     expect(parseSong('| G | C |  *2x*').lines[0]).toEqual({
       type: 'chords',
       chords: [
+        { text: '|', note: false },
         { text: 'G', note: false },
+        { text: '|', note: false },
         { text: 'C', note: false },
+        { text: '|', note: false },
         { text: '2x', note: true },
       ],
     });
@@ -438,12 +445,124 @@ describe('hasInlineChords', () => {
   });
 });
 
+describe('heading levels', () => {
+  const level = (s: string) => {
+    const line = parseSong(s).lines[0];
+    return line.type === 'heading' ? line.level : null;
+  };
+
+  it('steps ## down to ####', () => {
+    expect(level('## Biggest')).toBe(2);
+    expect(level('### Middle')).toBe(3);
+    expect(level('#### Smallest')).toBe(4);
+  });
+
+  it('bottoms out rather than shrinking away to nothing', () => {
+    expect(level('##### deeper')).toBe(4);
+    expect(level('######## deeper still')).toBe(4);
+  });
+
+  it('still reads a single # as a comment', () => {
+    expect(parseSong('# not a heading').lines).toEqual([]);
+  });
+
+  it('writes each level back out at its own depth', () => {
+    const source = ['## Two', '### Three', '#### Four'].join('\n');
+    expect(toChordPro(parseSong(source))).toBe(source);
+  });
+});
+
+/** The rendered runs of a one-line lyric, the way ChordChart resolves them. */
+const runsOf = (source: string) => {
+  const line = parseSong(source).lines[0];
+  return lyricRuns(line?.type === 'lyrics' ? line.pairs : []).flat();
+};
+
+describe('^^blinking cues^^', () => {
+  it('marks a cue in a lyric as blinking, without the carets', () => {
+    expect(runsOf('Amazing ^^watch me^^ grace')).toEqual([
+      { text: 'Amazing ', note: false },
+      { text: 'watch me', note: true, blink: true },
+      { text: ' grace', note: false },
+    ]);
+  });
+
+  it('marks one on a chord row, and is never taken for a chord', () => {
+    const line = parseSong('G      ^^watch^^      C').lines[0];
+    expect(line).toEqual({
+      type: 'chords',
+      chords: [
+        { text: 'G', note: false },
+        { text: 'watch', note: true, blink: true },
+        { text: 'C', note: false },
+      ],
+    });
+    expect(hasChords('^^watch^^')).toBe(false);
+  });
+
+  it('anchors over a lyric like a note does', () => {
+    const song = parseSong(['^^loud^^', 'Amazing grace'].join('\n'));
+    expect(song.lines).toEqual([
+      {
+        type: 'lyrics',
+        pairs: [{ chord: 'loud', lyric: 'Amazing grace', note: true, blink: true }],
+      },
+    ]);
+  });
+
+  it('survives a round trip through the writer', () => {
+    for (const source of ['| G | ^^2x^^ |', '## ^^Watch^^']) {
+      expect(toChordPro(parseSong(source))).toBe(source);
+    }
+  });
+
+  it('keeps its words out of a transposition', () => {
+    // "G" inside the cue is prose, not a chord to move.
+    expect(transposeContent('[C]Amazing ^^G is next^^ grace', 'C', 'D')).toBe(
+      '[D]Amazing ^^G is next^^ grace',
+    );
+  });
+
+  it('leaves a lone or unclosed caret as literal text', () => {
+    const runs = runsOf('2^4 and ^^never closed');
+    expect(runs.map((r) => r.text).join('')).toBe('2^4 and ^^never closed');
+    expect(runs.some((r) => r.blink)).toBe(false);
+  });
+});
+
+describe('punctRuns', () => {
+  const shape = (text: string) =>
+    punctRuns(text).map((r) => (r.punct ? `<${r.text}>` : r.text)).join('');
+
+  it('marks off bars, dashes and brackets', () => {
+    expect(shape('| G | C |')).toBe('<|> G <|> C <|>');
+    expect(shape('(C)')).toBe('<(>C<)>');
+    expect(shape('G - C')).toBe('G <-> C');
+  });
+
+  it('leaves text with nothing structural in it as one run', () => {
+    expect(punctRuns('Amazing grace')).toEqual([{ text: 'Amazing grace', punct: false }]);
+    expect(punctRuns('Em7')).toEqual([{ text: 'Em7', punct: false }]);
+  });
+
+  it('keeps a slash bass intact — it names the chord, it is not scaffolding', () => {
+    expect(punctRuns('E/G#')).toEqual([{ text: 'E/G#', punct: false }]);
+  });
+
+  it('runs of punctuation stay together, and every character survives', () => {
+    for (const s of ['| G | C |', '(C)', 'Ama-zing (oh)', '|| A ||', '']) {
+      expect(punctRuns(s).map((r) => r.text).join('')).toBe(s);
+    }
+    expect(punctRuns('|| A ||')[0]).toEqual({ text: '||', punct: true });
+  });
+});
+
 describe('transposeSong', () => {
   const source = ['{Verse 1}', '| G | D |', '[G]Amazing [D/F#]grace'].join('\n');
 
-  it('transposes every chord and leaves lyrics alone', () => {
+  it('transposes every chord and leaves lyrics and bars alone', () => {
     const out = toChordPro(transposeSong(parseSong(source), 'G', 'A'));
-    expect(out).toBe(['{Verse 1}', 'A E', '[A]Amazing [E/G#]grace'].join('\n'));
+    expect(out).toBe(['{Verse 1}', '| A | E |', '[A]Amazing [E/G#]grace'].join('\n'));
   });
 
   it('round-trips through an arbitrary key without drift', () => {

@@ -1,5 +1,5 @@
 import { Box, Button, Flex, HStack, Spinner, Text } from '@chakra-ui/react';
-import { Check, Link2, Link2Off, Minus, Music2, Pause, Play, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { Link2, Link2Off, Minus, Music2, Pause, Play, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import api, { apiError } from '@/lib/api';
 import { formatTime, useAudioPlayer } from '@/lib/useAudioPlayer';
@@ -16,7 +16,7 @@ interface Props {
    * the player then adopts the recording's own saved tune once it loads.
    */
   tuneOverride?: number;
-  /** When provided (and canEdit), a Save appears once the tune is changed. */
+  /** When provided (and canEdit), tune changes save themselves, debounced. */
   onSaveTune?: (semitones: number) => Promise<void>;
   /**
    * Render as a thin strip and defer the signed-URL fetch and full decode
@@ -27,8 +27,9 @@ interface Props {
   /**
    * When provided, a link toggle appears beside the pitch controls. While
    * linked, every pitch step reports its delta here so the caller can move
-   * the chart key in step with the track — an option, never a hard tie: the
-   * key stays independently editable and the link starts off.
+   * the chart key in step with the track. It starts linked, since pitching a
+   * track up almost always means playing it in the new key — but it is never a
+   * hard tie: unlink it, and the key stays independently editable either way.
    */
   onPitchDelta?: (delta: number) => void;
 }
@@ -67,9 +68,13 @@ export default function AudioPlayer({
   const tuneInitialised = useRef(tuneOverride !== undefined);
   const [savingTune, setSavingTune] = useState(false);
   const [tuneError, setTuneError] = useState('');
-  // Whether pitch steps also move the chart key, via onPitchDelta.
-  const [linked, setLinked] = useState(false);
+  // Whether pitch steps also move the chart key, via onPitchDelta. On by
+  // default: pitching the track is nearly always a decision about what key to
+  // play in, so following is the expected behaviour and unlinking the exception.
+  const [linked, setLinked] = useState(true);
   const barRef = useRef<HTMLDivElement>(null);
+
+  const canSaveTune = canEdit && Boolean(onSaveTune);
 
   const shiftBy = (delta: number) => {
     const next = clampShift(semitones + delta);
@@ -128,19 +133,43 @@ export default function AudioPlayer({
     }
   };
 
-  const saveTune = async () => {
-    if (!onSaveTune) return;
-    setSavingTune(true);
-    setTuneError('');
-    try {
-      await onSaveTune(semitones);
-      setSaved(semitones);
-    } catch (err) {
-      setTuneError(apiError(err, 'Could not save the tune'));
-    } finally {
-      setSavingTune(false);
+  // Tune changes save themselves. The pitch is found by ear, a semitone at a
+  // time, and a separate Save press was easy to walk away from — leaving the
+  // team playing along at a pitch nobody had actually stored. Debounced so a
+  // run of +/- presses lands as a single write.
+  const saveTuneRef = useRef(onSaveTune);
+  saveTuneRef.current = onSaveTune;
+  // The value a scheduled save is carrying, so unmounting mid-debounce (hiding
+  // the player, leaving the page) flushes it instead of dropping it.
+  const pendingTune = useRef<number | null>(null);
+
+  useEffect(() => {
+    // Back on the stored pitch — nothing owed, so drop any pending flush too,
+    // or stepping up and straight back down would still write the step.
+    if (!canSaveTune || semitones === saved) {
+      pendingTune.current = null;
+      return;
     }
-  };
+    pendingTune.current = semitones;
+    const value = semitones;
+    const timer = setTimeout(() => {
+      setSavingTune(true);
+      setTuneError('');
+      saveTuneRef
+        .current!(value)
+        .then(() => setSaved(value))
+        .catch((err) => setTuneError(apiError(err, 'Could not save the tune')))
+        .finally(() => setSavingTune(false));
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [semitones, saved, canSaveTune]);
+
+  useEffect(
+    () => () => {
+      if (pendingTune.current !== null) saveTuneRef.current?.(pendingTune.current).catch(() => {});
+    },
+    [],
+  );
 
   const scrub = (e: React.MouseEvent<HTMLDivElement>) => {
     const bar = barRef.current;
@@ -181,7 +210,6 @@ export default function AudioPlayer({
     semitones === 0
       ? 'Original pitch'
       : `${semitones > 0 ? '+' : ''}${semitones} ${Math.abs(semitones) === 1 ? 'semitone' : 'semitones'}`;
-  const canSaveTune = canEdit && Boolean(onSaveTune);
   const dirty = canSaveTune && semitones !== saved;
 
   return (
@@ -271,11 +299,10 @@ export default function AudioPlayer({
               {linked ? <Link2 size={12} /> : <Link2Off size={12} />}
             </Button>
           )}
-          {dirty && (
-            <Button size="xs" colorPalette="brand" variant="subtle" onClick={saveTune} loading={savingTune}>
-              <Check size={12} />
-              <Text ml={1}>Save tune</Text>
-            </Button>
+          {(dirty || savingTune) && (
+            <Text fontSize="xs" color="gray.500" minW="52px">
+              Saving…
+            </Text>
           )}
         </HStack>
 
@@ -291,7 +318,7 @@ export default function AudioPlayer({
           {tuneError}
         </Text>
       )}
-      {canSaveTune && !dirty && saved !== 0 && (
+      {canSaveTune && !dirty && !savingTune && saved !== 0 && (
         <Text fontSize="xs" color="gray.500" mt={2}>
           Saved tune: {saved > 0 ? '+' : ''}{saved} — everyone plays along at this pitch.
         </Text>

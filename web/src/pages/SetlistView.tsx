@@ -2,8 +2,8 @@ import {
   Badge, Box, Button, Flex, HStack, Heading, Input, Spinner, Stack, Text, Textarea,
 } from '@chakra-ui/react';
 import {
-  ArrowLeft, ChevronDown, ChevronUp, EyeOff, FileDown, Music2, Pencil, Plus, Printer, RefreshCw,
-  StickyNote, Trash2, X,
+  ArrowLeft, ChevronDown, ChevronUp, Columns2, EyeOff, FileDown, Music2, Pencil, Plus, Printer,
+  RefreshCw, StickyNote, Trash2, X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -96,6 +96,17 @@ export default function SetlistView() {
       keyOverride: clearKey ? null : key,
       clearKey,
     });
+  };
+
+  // The column count belongs to the shared chart, not to the reader, so it
+  // saves onto the item the way the key does — the editor page still offers it,
+  // this just spares a round trip through it to flip one setting. Updated
+  // locally so open players stay mounted.
+  const setColumns = async (item: SetlistItem, columns: number) => {
+    setItems((prev) =>
+      prev.map((it) => (it.id === item.id ? { ...it, chartColumns: columns } : it)),
+    );
+    await api.patch(`/api/setlists/${id}/items/${item.id}`, { chartColumns: columns });
   };
 
   // Capo and the private note are personal: saved against this account only,
@@ -478,6 +489,25 @@ export default function SetlistView() {
                           </option>
                         ))}
                       </select>
+                    )}
+                    {/* Only worth offering where there's a chart to lay out. */}
+                    {editable && item.content.trim() && (
+                      <Button
+                        size="xs"
+                        variant={item.chartColumns === 2 ? 'subtle' : 'outline'}
+                        colorPalette={item.chartColumns === 2 ? 'brand' : 'gray'}
+                        onClick={() => setColumns(item, item.chartColumns === 2 ? 1 : 2)}
+                        title={
+                          item.chartColumns === 2
+                            ? 'Two columns — click for one. Narrow screens show one either way.'
+                            : 'One column — click to split the chart into two side by side.'
+                        }
+                        aria-label={
+                          item.chartColumns === 2 ? 'Switch to one column' : 'Switch to two columns'
+                        }
+                      >
+                        <Columns2 size={14} />
+                      </Button>
                     )}
                     {editable && (
                       <>

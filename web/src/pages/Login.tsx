@@ -8,7 +8,7 @@ import { useApp } from '@/contexts/AppContext';
 export default function Login() {
   const { user, login } = useApp();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -21,7 +21,7 @@ export default function Login() {
     setError('');
     try {
       const { data } = await api.post<{ token: string; user: User }>('/api/auth/login', {
-        email,
+        identifier,
         password,
       });
       login(data.token, data.user);
@@ -54,12 +54,14 @@ export default function Login() {
 
         <form onSubmit={submit}>
           <Stack gap={3}>
+            {/* Not type="email": the browser would reject a bare username as
+                malformed before the request ever left. */}
             <Input
-              type="email"
-              placeholder="Email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
+              type="text"
+              placeholder="Email or username"
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              autoComplete="username"
               required
             />
             <Input

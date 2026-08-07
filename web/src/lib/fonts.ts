@@ -17,6 +17,11 @@ export interface FontOption {
 
 export const FONTS: FontOption[] = [
   {
+    id: 'mono',
+    label: 'Monospace',
+    stack: `ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, monospace`,
+  },
+  {
     id: 'century-gothic',
     label: 'Century Gothic',
     stack: `'Century Gothic', CenturyGothic, 'URW Gothic', 'URW Gothic L', AppleGothic, 'Questrial', 'Didact Gothic', 'Trebuchet MS', sans-serif`,
@@ -31,13 +36,12 @@ export const FONTS: FontOption[] = [
     label: 'Serif',
     stack: `Georgia, 'Times New Roman', serif`,
   },
-  {
-    id: 'mono',
-    label: 'Monospace',
-    stack: `ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, monospace`,
-  },
 ];
 
+/** Monospace, so a chart reads on screen the way it was typed in the editor —
+ *  equal-width characters put every chord over the column it was written at.
+ *  Only the starting point: the picker still overrides it per device, and
+ *  anyone who already chose a font keeps theirs. */
 export const DEFAULT_FONT = FONTS[0];
 
 const STORAGE_KEY = 'transcode.font';

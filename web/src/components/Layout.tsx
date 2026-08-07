@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useApp } from '@/contexts/AppContext';
 import { MetronomeProvider } from '@/contexts/MetronomeContext';
+import ChartSyntaxGuide from '@/components/ChartSyntaxGuide';
 import { FONTS } from '@/lib/fonts';
 
 export default function Layout({ children }: { children: ReactNode }) {
@@ -100,6 +101,10 @@ export default function Layout({ children }: { children: ReactNode }) {
       <Container maxW="6xl" py={6}>
         {children}
       </Container>
+
+      {/* Mounted app-wide, beside the metronome: the format is worth looking up
+          while reading a chart someone else wrote, not only while writing one. */}
+      <ChartSyntaxGuide />
     </Box>
     </MetronomeProvider>
   );

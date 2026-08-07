@@ -1,7 +1,7 @@
 import {
   Badge, Box, Button, Flex, HStack, Heading, Input, Spinner, Stack, Text,
 } from '@chakra-ui/react';
-import { Copy, Plus, Trash2 } from 'lucide-react';
+import { Copy, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import api, { apiError } from '@/lib/api';
 import type { Role, User } from '@/lib/auth';
@@ -21,8 +21,11 @@ export default function Users() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [inviteLink, setInviteLink] = useState('');
-  const [form, setForm] = useState({ name: '', email: '', role: 'member' as Role });
+  const [form, setForm] = useState({ name: '', email: '', username: '', role: 'member' as Role });
   const [creating, setCreating] = useState(false);
+  // At most one row's username is in edit mode, mirroring the single `creating`
+  // toggle above rather than keeping a draft per user.
+  const [editingUsername, setEditingUsername] = useState<{ id: string; value: string } | null>(null);
 
   const load = () =>
     api
@@ -41,7 +44,7 @@ export default function Users() {
     try {
       const { data } = await api.post<{ inviteLink: string }>('/api/users', form);
       setInviteLink(data.inviteLink);
-      setForm({ name: '', email: '', role: 'member' });
+      setForm({ name: '', email: '', username: '', role: 'member' });
       setCreating(false);
       load();
     } catch (err) {
@@ -64,6 +67,20 @@ export default function Users() {
       load();
     } catch (err) {
       setError(apiError(err, 'Could not update role'));
+    }
+  };
+
+  const saveUsername = async (id: string, raw: string) => {
+    const username = raw.trim();
+    setError('');
+    try {
+      // An omitted field leaves the column untouched, so emptying the box has
+      // to say clearUsername explicitly to take the handle back off.
+      await api.patch(`/api/users/${id}`, username ? { username } : { clearUsername: true });
+      setEditingUsername(null);
+      load();
+    } catch (err) {
+      setError(apiError(err, 'Could not update username'));
     }
   };
 
@@ -102,6 +119,12 @@ export default function Users() {
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
               maxW="240px"
+            />
+            <Input
+              placeholder="Username (optional)"
+              value={form.username}
+              onChange={(e) => setForm({ ...form, username: e.target.value })}
+              maxW="200px"
             />
             <select
               value={form.role}
@@ -157,6 +180,40 @@ export default function Users() {
                   <Text fontSize="sm" color="gray.600">
                     {u.email}
                   </Text>
+                  {editingUsername?.id === u.id ? (
+                    <HStack gap={2} mt={1}>
+                      <Input
+                        size="xs"
+                        placeholder="Username"
+                        value={editingUsername.value}
+                        onChange={(e) => setEditingUsername({ id: u.id, value: e.target.value })}
+                        maxW="180px"
+                      />
+                      <Button
+                        size="xs"
+                        colorPalette="brand"
+                        onClick={() => saveUsername(u.id, editingUsername.value)}
+                      >
+                        Save
+                      </Button>
+                      <Button size="xs" variant="ghost" onClick={() => setEditingUsername(null)}>
+                        Cancel
+                      </Button>
+                    </HStack>
+                  ) : (
+                    <HStack gap={1} mt={1}>
+                      <Text fontSize="sm" color={u.username ? 'gray.600' : 'gray.400'}>
+                        {u.username ?? 'No username'}
+                      </Text>
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        onClick={() => setEditingUsername({ id: u.id, value: u.username ?? '' })}
+                      >
+                        <Pencil size={12} />
+                      </Button>
+                    </HStack>
+                  )}
                 </Box>
 
                 <HStack gap={2}>

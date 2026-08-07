@@ -12,7 +12,10 @@
  */
 
 import { jsPDF } from 'jspdf';
-import { lyricRuns, parseSong, transposeSong, type Line, type TextRun } from './chordpro';
+import {
+  lyricRuns, parseSong, punctRuns, transposeSong,
+  type HeadingLevel, type Line, type TextRun,
+} from './chordpro';
 import { sectionKey } from './noteColors';
 import type { NoteCard } from '@/types';
 
@@ -30,7 +33,13 @@ const INK = '#141a22';
 const MUTED = '#5d564e';
 const RULE = '#dfd8cc';
 const BLUE = '#2563eb'; // chords and section headers
-const RED = '#c0392b'; // author's notes
+// Author's notes. A ^^blinking cue^^ prints as one too: paper can't blink, and
+// the two say the same thing — this is an aside, not something to play.
+const RED = '#c0392b';
+// Structural punctuation — bars, dashes, brackets — at half strength, the flat
+// equivalent of the opacity ChordChart gives it on screen.
+const BLUE_FAINT = '#92b1f5';
+const INK_FAINT = '#898c90';
 
 /** Note-card colours, mirroring NOTE_COLORS as flat hex for the PDF. */
 const CARD_COLORS: Record<string, { bg: string; border: string; fg: string }> = {
@@ -90,6 +99,23 @@ function style(ctx: Ctx, size: number, weight: Weight, color: string) {
 
 /** Width of `text` in the font that is currently set. */
 const widthOf = (ctx: Ctx, text: string) => (text ? ctx.doc.getTextWidth(text) : 0);
+
+/**
+ * Draws text with its structural punctuation faded, mirroring ChordChart.
+ *
+ * Every run keeps the font already set and only the colour changes, so the
+ * total advance is the same width the caller measured with widthOf — nothing
+ * about the layout depends on this.
+ */
+function drawFaded(ctx: Ctx, text: string, x: number, y: number, ink: string, faint: string) {
+  let cx = x;
+  for (const run of punctRuns(text)) {
+    ctx.doc.setTextColor(run.punct ? faint : ink);
+    ctx.doc.text(safe(run.text), cx, y);
+    cx += widthOf(ctx, run.text);
+  }
+  ctx.doc.setTextColor(ink);
+}
 
 /** Baseline for a line of `size` whose top sits at `top`. */
 const baseline = (top: number, size: number) => top + size * 0.8;
@@ -171,6 +197,10 @@ interface Cell {
   chordWidth: number;
 }
 
+/** "##" through "####", against the body size — the same steps ChordChart
+ *  uses on screen, so a printed chart keeps the shape of the one on it. */
+const HEADING_SCALE: Record<HeadingLevel, number> = { 2: 1.5, 3: 1.25, 4: 1.08 };
+
 /** Gap kept to the right of a chord so neighbouring chords never touch. */
 const CHORD_PAD = 5;
 /** Gap between tokens on a bar-chart row. */
@@ -237,12 +267,15 @@ function drawCellRow(ctx: Ctx, row: Cell[], size: number, chordSize: number, sho
   for (const cell of row) {
     if (hasChord && cell.chord) {
       style(ctx, chordSize, cell.chordNote ? 'bolditalic' : 'bold', cell.chordNote ? RED : BLUE);
-      ctx.doc.text(safe(cell.chord), x, baseline(ctx.y, chordSize));
+      // A note is prose — its own brackets are part of what it says.
+      if (cell.chordNote) ctx.doc.text(safe(cell.chord), x, baseline(ctx.y, chordSize));
+      else drawFaded(ctx, cell.chord, x, baseline(ctx.y, chordSize), BLUE, BLUE_FAINT);
     }
     let lx = x;
     for (const run of cell.runs) {
       style(ctx, size, run.note ? 'bolditalic' : 'normal', run.note ? RED : INK);
-      ctx.doc.text(safe(run.text), lx, baseline(ctx.y + chordH, size));
+      if (run.note) ctx.doc.text(safe(run.text), lx, baseline(ctx.y + chordH, size));
+      else drawFaded(ctx, run.text, lx, baseline(ctx.y + chordH, size), INK, INK_FAINT);
       lx += widthOf(ctx, run.text);
     }
     x += cell.width;
@@ -287,7 +320,8 @@ function drawChordLine(ctx: Ctx, line: Extract<Line, { type: 'chords' }>, chordS
       x = MARGIN.left;
       style(ctx, chordSize, token.note ? 'bolditalic' : 'bold', token.note ? RED : BLUE);
     }
-    ctx.doc.text(safe(token.text), x, baseline(ctx.y, chordSize));
+    if (token.note) ctx.doc.text(safe(token.text), x, baseline(ctx.y, chordSize));
+    else drawFaded(ctx, token.text, x, baseline(ctx.y, chordSize), BLUE, BLUE_FAINT);
     x += w + TOKEN_GAP;
   }
   ctx.y += lineH;
@@ -330,8 +364,8 @@ function drawChart(ctx: Ctx, song: PdfSong) {
         break;
       }
       case 'heading': {
-        // "## text" / "### text" — oversized bold lines, matching the chart.
-        const hs = size * (line.level === 2 ? 1.5 : 1.25);
+        // "##" through "####" — oversized bold lines, matching the chart.
+        const hs = size * HEADING_SCALE[line.level];
         const lineH = hs * 1.4;
         ensure(ctx, lineH);
         style(ctx, hs, 'bold', INK);

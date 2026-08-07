@@ -1,7 +1,7 @@
 import {
   Badge, Box, Button, Flex, HStack, Heading, Spinner, Stack, Text,
 } from '@chakra-ui/react';
-import { ArrowLeft, FileDown, Gauge, Minus, Pencil, Plus, Printer } from 'lucide-react';
+import { ArrowLeft, Columns2, FileDown, Gauge, Minus, Pencil, Plus, Printer } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import api, { apiError } from '@/lib/api';
@@ -95,6 +95,16 @@ export default function SongView() {
     } finally {
       setPdfBusy(false);
     }
+  };
+
+  // The one control on this page that writes anything. Every other setting
+  // here — key, capo, size, chords on or off — is how *you* are reading the
+  // chart right now, and dies with the page. The column count is a property of
+  // the chart itself: it belongs to the song, everyone gets it, and it saves on
+  // the press, the same as the copy of this control on a setlist.
+  const setColumns = async (columns: number) => {
+    setSong((s) => (s ? { ...s, chartColumns: columns } : s));
+    await api.patch(`/api/songs/${id}`, { chartColumns: columns });
   };
 
   // The reference track carries its own pitch control and is not driven from
@@ -212,6 +222,25 @@ export default function SongView() {
           <Button size="sm" variant={showChords ? 'subtle' : 'outline'} onClick={() => setShowChords((v) => !v)}>
             {showChords ? 'Hide chords' : 'Show chords'}
           </Button>
+
+          {/* Saved to the song, so it is offered only where there's a chart to
+              lay out and only to those who may change one. */}
+          {canEdit(user) && song.content.trim() && (
+            <Button
+              size="sm"
+              variant={song.chartColumns === 2 ? 'subtle' : 'outline'}
+              colorPalette={song.chartColumns === 2 ? 'brand' : 'gray'}
+              onClick={() => setColumns(song.chartColumns === 2 ? 1 : 2)}
+              title={
+                song.chartColumns === 2
+                  ? 'Two columns, saved to the song — click for one. Narrow screens show one either way.'
+                  : 'One column, saved to the song — click to split the chart into two.'
+              }
+            >
+              <Columns2 size={14} />
+              <Text ml={1}>{song.chartColumns === 2 ? '2 columns' : '1 column'}</Text>
+            </Button>
+          )}
 
           {song.tempo && (
             <Button

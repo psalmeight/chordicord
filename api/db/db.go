@@ -192,6 +192,18 @@ func Migrate(database *sqlx.DB) {
 			PRIMARY KEY (setlist_item_id, user_id)
 		);`,
 		`CREATE INDEX IF NOT EXISTS setlist_item_prefs_user_idx ON setlist_item_prefs (user_id);`,
+
+		// A second way to sign in. Nullable because every existing account
+		// predates it and none should be forced to invent one. Stored
+		// lowercased at every write site, which is what lets a plain UNIQUE do
+		// case-insensitive uniqueness without dragging in citext — the login
+		// lookup lowercases its input to match. A partial index excluding NULLs
+		// would be redundant: Postgres already treats NULLs as distinct, so any
+		// number of accounts can sit without a username. The name matches the
+		// constraint schema.sql declares, so handlers can recognise a username
+		// collision by name on either a migrated or a freshly-created database.
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS username varchar(64);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS users_username_key ON users (username);`,
 	}
 
 	for _, s := range stmts {

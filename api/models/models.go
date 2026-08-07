@@ -53,8 +53,12 @@ func (n *NoteCards) Scan(src any) error {
 }
 
 type User struct {
-	ID           string     `db:"id" json:"id"`
-	Email        string     `db:"email" json:"email"`
+	ID    string `db:"id" json:"id"`
+	Email string `db:"email" json:"email"`
+	// Optional alternative sign-in handle, always stored lowercased. nil for
+	// accounts that predate it or never wanted one — it is never derived from
+	// the email, since a guessable handle is worse than none.
+	Username     *string    `db:"username" json:"username"`
 	PasswordHash string     `db:"password_hash" json:"-"`
 	Name         string     `db:"name" json:"name"`
 	Role         string     `db:"role" json:"role"`

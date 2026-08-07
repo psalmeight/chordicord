@@ -15,7 +15,9 @@ Same shape as `doctrine`:
 - **api/** — Go 1.23 + Gin, `sqlx`/`pgx` over Postgres, hand-written SQL, no ORM
 - **web/** — React 19 + Vite 6 + TypeScript + Chakra UI v3
 - **Auth** — HS256 JWT bearer tokens in `localStorage`, admin-created accounts
-  with an invite link (no self-signup, no email sending)
+  with an invite link (no self-signup, no email sending). Sign in with either
+  the email address or an optional username; usernames are stored lowercased,
+  so they are unique and matched case-insensitively without `citext`.
 
 ## Roles
 
@@ -65,8 +67,14 @@ That [G]saved a wretch like [D]me
 - `{Verse 1}` marks a section (a bare `Chorus:` line works too)
 - `| G | C |` on its own line is an instrumental / turnaround
 - `#` starts a comment line
-- `## Big text` renders an oversized heading line (`###` for a smaller one)
+- `## Big text` renders an oversized heading line (`###` and `####` step down)
 - `*hold*` anywhere marks a red cue that is never treated as a chord
+- `^^watch me^^` is the same, but blinks — for a cue you have to catch
+  mid-song. It prints as a plain red cue, and holds still for anyone whose
+  system asks for reduced motion.
+
+The ⓘ button in the bottom-right corner opens the same reference with each rule
+rendered as it will actually appear, on any page.
 
 Everything else — title, artist, key, time signature, tempo, feel, CCLI number,
 tags, and free-text notes — lives in structured fields alongside the body.
@@ -88,7 +96,10 @@ songbank** action re-pulls the current songbank version into the copy when you
 want it. On top of that, capo and a private note on each setlist song are
 **per account**: saved to your login, synced across your devices, and invisible
 to the rest of the team. The reference track's saved pitch also lives on the
-setlist item, not the songbank.
+setlist item, not the songbank — and it saves itself: pitch the track up a
+semitone and the chart key follows it, both stored without pressing anything.
+Unlink them with the chain button beside the pitch controls if you want the
+track moved but the chords left where they are.
 
 ## Tests
 

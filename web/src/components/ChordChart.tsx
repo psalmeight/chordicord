@@ -1,6 +1,8 @@
 import { Box, Text } from '@chakra-ui/react';
 import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { lyricRuns, parseSong, transposeSong, type Line } from '@/lib/chordpro';
+import {
+  lyricRuns, parseSong, punctRuns, transposeSong, type HeadingLevel, type Line,
+} from '@/lib/chordpro';
 import { sectionKey } from '@/lib/noteColors';
 import { NoteCardList } from '@/components/NoteCardView';
 import type { NoteCard } from '@/types';
@@ -8,6 +10,41 @@ import type { NoteCard } from '@/types';
 /** An author's note, wherever it turns up — chord row, lyric or its own line.
  *  Red, bold and italic so it never reads as something to play or sing. */
 const NOTE_STYLE = { color: 'red.600', fontStyle: 'italic', fontWeight: 'bold' } as const;
+
+/** ^^A cue^^ that has to be caught mid-song. The pulse itself lives in CSS so
+ *  print, and anyone who has asked for less motion, can switch it off. */
+const BLINK_STYLE = { color: 'red.600', fontWeight: 'bold', className: 'chart-blink' } as const;
+
+/** How the author marked this text up, if at all. */
+const markStyle = (m: { note?: boolean; blink?: boolean }) =>
+  m.blink ? BLINK_STYLE : m.note ? NOTE_STYLE : null;
+
+/** "##" through "####", relative to the chart's own size so they scale with
+ *  the reader's font setting. */
+const HEADING_SIZES: Record<HeadingLevel, string> = { 2: '1.5em', 3: '1.25em', 4: '1.08em' };
+
+/** How far back structural punctuation sits — bars, dashes and brackets frame
+ *  the chart without being part of it, so they read as scaffolding. */
+const PUNCT_OPACITY = 0.5;
+
+/** Text with its punctuation faded. Inline spans only, so nothing shifts: the
+ *  chart's width measurement and every chord column stay exactly where they
+ *  were. */
+function Faded({ text }: { text: string }) {
+  return (
+    <>
+      {punctRuns(text).map((run, i) =>
+        run.punct ? (
+          <Box as="span" key={i} opacity={PUNCT_OPACITY}>
+            {run.text}
+          </Box>
+        ) : (
+          <Fragment key={i}>{run.text}</Fragment>
+        ),
+      )}
+    </>
+  );
+}
 
 /** Chart line height, shared so an empty lyric row can be held to exactly the
  *  height a line of text would have taken. */
@@ -164,9 +201,10 @@ function ChartLine({ line, showChords }: { line: Line; showChords: boolean }) {
       );
 
     case 'heading':
-      // "## text" and "### text" — oversized lines for titles and callouts.
+      // "##" down to "####" — oversized lines for titles and callouts. Even
+      // the smallest still outranks a lyric, or it would say nothing.
       return (
-        <Text mt={2} mb={1} fontWeight="bold" fontSize={line.level === 2 ? '1.5em' : '1.25em'}>
+        <Text mt={2} mb={1} fontWeight="bold" fontSize={HEADING_SIZES[line.level]}>
           {line.text}
         </Text>
       );
@@ -176,8 +214,9 @@ function ChartLine({ line, showChords }: { line: Line; showChords: boolean }) {
       return (
         <Box mb={1} fontWeight="bold" color="blue.600">
           {line.chords.map((token, i) => (
-            <Box as="span" key={i} pr={3} {...(token.note ? NOTE_STYLE : null)}>
-              {token.text}
+            <Box as="span" key={i} pr={3} {...markStyle(token)}>
+              {/* A mark is prose — its own brackets are part of what it says. */}
+              {token.note ? token.text : <Faded text={token.text} />}
             </Box>
           ))}
         </Box>
@@ -201,9 +240,9 @@ function ChartLine({ line, showChords }: { line: Line; showChords: boolean }) {
                   fontWeight="bold"
                   color="blue.600"
                   pr={pair.chord ? 2 : 0}
-                  {...(pair.note ? NOTE_STYLE : null)}
+                  {...markStyle(pair)}
                 >
-                  {pair.chord}
+                  {pair.note ? pair.chord : <Faded text={pair.chord} />}
                 </Box>
               )}
               {/* A chord past the end of the lyric has nothing under it. The
@@ -212,11 +251,11 @@ function ChartLine({ line, showChords }: { line: Line; showChords: boolean }) {
               <Box minHeight={`${LINE_HEIGHT}em`}>
                 {runs[i].map((run, j) =>
                   run.note ? (
-                    <Box as="span" key={j} {...NOTE_STYLE}>
+                    <Box as="span" key={j} {...markStyle(run)}>
                       {run.text}
                     </Box>
                   ) : (
-                    <Fragment key={j}>{run.text}</Fragment>
+                    <Faded key={j} text={run.text} />
                   ),
                 )}
               </Box>

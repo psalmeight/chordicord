@@ -16,7 +16,7 @@ func ListUsers(database *sqlx.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var users []models.User
 		err := database.Select(&users,
-			`SELECT id, email, password_hash, name, role, verified_at, created_at, updated_at
+			`SELECT id, email, username, password_hash, name, role, verified_at, created_at, updated_at
 			 FROM users ORDER BY name`)
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Failed to load users"})
@@ -36,9 +36,10 @@ func ListUsers(database *sqlx.DB) gin.HandlerFunc {
 func CreateUser(database *sqlx.DB, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
-			Email string `json:"email"`
-			Name  string `json:"name"`
-			Role  string `json:"role"`
+			Email    string `json:"email"`
+			Username string `json:"username"`
+			Name     string `json:"name"`
+			Role     string `json:"role"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil || body.Email == "" || body.Name == "" {
 			c.JSON(400, gin.H{"error": "Email and name are required"})
@@ -51,6 +52,17 @@ func CreateUser(database *sqlx.DB, cfg *config.Config) gin.HandlerFunc {
 			c.JSON(400, gin.H{"error": "Invalid role"})
 			return
 		}
+		// Omitted means "no username" rather than "the empty username": the
+		// column is nullable and '' would be a value that collides with itself.
+		var username *string
+		if body.Username != "" {
+			u, err := validateUsername(body.Username)
+			if err != nil {
+				c.JSON(400, gin.H{"error": err.Error()})
+				return
+			}
+			username = &u
+		}
 
 		hash, err := bcrypt.GenerateFromPassword([]byte(uuidString()), bcryptCost)
 		if err != nil {
@@ -60,10 +72,18 @@ func CreateUser(database *sqlx.DB, cfg *config.Config) gin.HandlerFunc {
 
 		var id string
 		err = database.QueryRowx(
-			`INSERT INTO users (email, password_hash, name, role)
-			 VALUES ($1, $2, $3, $4) RETURNING id`,
-			normalizeEmail(body.Email), string(hash), body.Name, body.Role).Scan(&id)
+			`INSERT INTO users (email, username, password_hash, name, role)
+			 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+			normalizeEmail(body.Email), username, string(hash), body.Name, body.Role).Scan(&id)
 		if err != nil {
+			// Two columns can now collide, and telling the admin which one
+			// saves them guessing. The username constraint carries the same
+			// name whether the database came from schema.sql or Migrate; the
+			// email one does not, so it's the fallback rather than the test.
+			if name, ok := isUniqueViolation(err); ok && name == "users_username_key" {
+				c.JSON(400, gin.H{"error": "That username is already taken"})
+				return
+			}
 			c.JSON(400, gin.H{"error": "A user with that email already exists"})
 			return
 		}
@@ -106,10 +126,23 @@ func UpdateUser(database *sqlx.DB) gin.HandlerFunc {
 		var body struct {
 			Name *string `json:"name"`
 			Role *string `json:"role"`
+			// username is nullable, so COALESCE can't say "take it away".
+			// ClearUsername is the explicit flag, as on setlist items.
+			Username      *string `json:"username"`
+			ClearUsername bool    `json:"clearUsername"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(400, gin.H{"error": "Invalid request"})
 			return
+		}
+
+		if body.Username != nil && !body.ClearUsername {
+			u, err := validateUsername(*body.Username)
+			if err != nil {
+				c.JSON(400, gin.H{"error": err.Error()})
+				return
+			}
+			body.Username = &u
 		}
 
 		if body.Role != nil {
@@ -129,11 +162,16 @@ func UpdateUser(database *sqlx.DB) gin.HandlerFunc {
 			`UPDATE users SET
 				name = COALESCE($1, name),
 				role = COALESCE($2, role)::user_role,
+				username = CASE WHEN $3 THEN NULL ELSE COALESCE($4, username) END,
 				updated_at = NOW()
-			 WHERE id = $3
-			 RETURNING id, email, password_hash, name, role, verified_at, created_at, updated_at`,
-			body.Name, body.Role, id)
+			 WHERE id = $5
+			 RETURNING id, email, username, password_hash, name, role, verified_at, created_at, updated_at`,
+			body.Name, body.Role, body.ClearUsername, body.Username, id)
 		if err != nil {
+			if name, ok := isUniqueViolation(err); ok && name == "users_username_key" {
+				c.JSON(400, gin.H{"error": "That username is already taken"})
+				return
+			}
 			c.JSON(404, gin.H{"error": "User not found"})
 			return
 		}

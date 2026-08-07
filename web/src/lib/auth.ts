@@ -3,6 +3,8 @@ export type Role = 'admin' | 'leader' | 'member';
 export interface User {
   id: string;
   email: string;
+  /** Optional second sign-in handle; null for accounts that never set one. */
+  username: string | null;
   name: string;
   role: Role;
   verifiedAt: string | null;

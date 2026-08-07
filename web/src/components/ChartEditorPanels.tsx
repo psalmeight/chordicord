@@ -154,13 +154,9 @@ export default function ChartEditorPanels({
             </Button>
           </HStack>
         </Flex>
+        {/* Only what's true of *this* chart right now stays on the page; the
+            format itself is one press away, in the guide button. */}
         <Text fontSize="xs" color="gray.600" mb={3}>
-          Write chords on their own line above the lyric — each one lands on whatever it sits
-          over. Inline <code>[G]Amazing</code> still works, and the two can be mixed. Mark
-          sections with <code>{'{Verse 1}'}</code>, and wrap a cue in asterisks —{' '}
-          <code>*hold*</code> — to show it in red anywhere on a chord row, in a lyric, or on a
-          line of its own. Start a line with <code>##</code> for big text (<code>###</code> for
-          slightly smaller); a single <code>#</code> is a hidden comment.{' '}
           {songKey ? (
             <>
               Write in the key of <strong>{songKey}</strong> — everyone can transpose from there.

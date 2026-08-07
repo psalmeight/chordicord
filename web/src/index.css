@@ -58,11 +58,37 @@ body {
   tab-size: 4;
 }
 
+/* ^^text^^ — a cue that has to be caught mid-song. It never fades all the way
+   out: the point is to pull the eye back, not to make the words unreadable at
+   the moment someone finally looks. */
+@keyframes chart-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0.25; }
+}
+
+.chart-blink {
+  animation: chart-blink 1.1s steps(1, end) infinite;
+}
+
+/* Anyone who has asked their system for less motion keeps the emphasis and
+   loses the pulse — a blinking cue is exactly the kind of thing that setting
+   exists to stop. */
+@media (prefers-reduced-motion: reduce) {
+  .chart-blink {
+    animation: none;
+  }
+}
+
 @media print {
   .no-print {
     display: none !important;
   }
   .chart {
     font-size: 11pt;
+  }
+  /* Paper can't blink; it would print at whichever frame the browser stopped
+     on, which could be the faded one. */
+  .chart-blink {
+    animation: none;
   }
 }

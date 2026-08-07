@@ -10,13 +10,20 @@ EXCEPTION WHEN duplicate_object THEN null; END $$;
 CREATE TABLE IF NOT EXISTS "users" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"email" varchar(255) NOT NULL,
+	-- Optional second way to sign in. NULL for anyone who never chose one, and
+	-- NULLs don't collide under a UNIQUE constraint, so any number of accounts
+	-- can go without. Always written lowercased (like email), which is what
+	-- makes a plain UNIQUE enough to enforce case-insensitive uniqueness —
+	-- storing mixed case here would let "Dave" and "dave" both exist.
+	"username" varchar(64),
 	"password_hash" varchar(255) NOT NULL,
 	"name" varchar(255) NOT NULL,
 	"role" "user_role" DEFAULT 'member' NOT NULL,
 	"verified_at" timestamp,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL,
-	CONSTRAINT "users_email_unique" UNIQUE("email")
+	CONSTRAINT "users_email_unique" UNIQUE("email"),
+	CONSTRAINT "users_username_key" UNIQUE("username")
 );
 
 CREATE TABLE IF NOT EXISTS "songs" (

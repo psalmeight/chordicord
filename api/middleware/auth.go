@@ -50,7 +50,7 @@ func RequireAuth(database *sqlx.DB, secret string) gin.HandlerFunc {
 
 		var user models.User
 		err = database.Get(&user,
-			`SELECT id, email, password_hash, name, role, verified_at, created_at, updated_at
+			`SELECT id, email, username, password_hash, name, role, verified_at, created_at, updated_at
 			 FROM users WHERE id = $1`, userID)
 		if errors.Is(err, sql.ErrNoRows) {
 			c.AbortWithStatusJSON(401, gin.H{"error": "Unauthorized"})

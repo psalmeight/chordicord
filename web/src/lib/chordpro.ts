@@ -6,7 +6,7 @@
  *   [G]Amazing [C]grace  inline chords, anchored to the syllable after them
  *   | G | C | D |        a chord-only line, rendered as-is
  *   # a comment          ignored
- *   ## Big text          oversized heading line ("###" for a smaller one)
+ *   ## Big text          oversized heading line ("###" and "####" step down)
  *
  * Chords may also be written on their own line above the lyric, in which case
  * each chord anchors to the column it starts at:
@@ -24,34 +24,53 @@
  *
  *       G     *hold*     C
  *   Amazing grace *softly* how sweet
+ *
+ * ^^Double carets^^ mark the same kind of aside, but one that has to be caught
+ * mid-song, so it blinks instead of merely sitting there in red.
  */
 
 import { parseChord, transposeChordToKey } from './chords';
 
-export interface ChordPair {
+/**
+ * `note` means the text was marked up by the author — *a note* or a ^^blinking
+ * cue^^ — rather than being a chord. The two are structurally identical:
+ * neither is played, neither is transposed, neither counts as evidence that a
+ * line is a chord row. Only the renderers tell them apart, via `blink`, so
+ * every "is this a chord?" test in here can go on asking `!note` alone.
+ *
+ * `blink` is set only when true, never to false, so a plain token still deep-
+ * equals the shape it had before blinking existed.
+ */
+export interface Marked {
+  note?: boolean;
+  blink?: true;
+}
+
+export interface ChordPair extends Marked {
   chord: string; // '' when the lyric has no chord above it
   lyric: string;
-  /** The chord slot holds an author's note rather than a chord. */
-  note?: boolean;
 }
 
-/** A token on a chord row: a chord, or an author's note written *like this*. */
-export interface ChordToken {
+/** A token on a chord row: a chord, or author's text written *like this*. */
+export interface ChordToken extends Marked {
   text: string;
   note: boolean;
 }
 
-/** A stretch of lyric text, flagged when it came from inside *asterisks*. */
-export interface TextRun {
+/** A stretch of lyric text, flagged when it came from inside a mark. */
+export interface TextRun extends Marked {
   text: string;
   note: boolean;
 }
+
+/** Heading sizes, largest first: "##", "###", "####". */
+export type HeadingLevel = 2 | 3 | 4;
 
 export type Line =
   | { type: 'section'; name: string }
   | { type: 'lyrics'; pairs: ChordPair[] }
   | { type: 'chords'; chords: ChordToken[] }
-  | { type: 'heading'; text: string; level: 2 | 3 }
+  | { type: 'heading'; text: string; level: HeadingLevel }
   | { type: 'blank' };
 
 export interface ParsedSong {
@@ -65,11 +84,61 @@ const SECTION_COLON_RE = /^([A-Za-z][A-Za-z0-9 '’\-]{0,30}):\s*$/;
 const CHORD_LINE_RE = /^[|\s]*(?:\(?[A-G][^\s|]*[\s|]*)+$/;
 /** A line of nothing but bracketed chords, e.g. "  [G]     [C]". */
 const BRACKET_LINE_RE = /^(?:\[[^\]]*\]\s*)+$/;
-/** An author's note. Kept to one line so a stray asterisk can't run away with
- *  the rest of the chart. */
-const NOTE_RE = /\*([^*\n]+)\*/;
-/** One token on a chord row: a note, a bracketed chord, or a bare run. */
-const CHORD_TOKEN_RE = /\*[^*\n]+\*|\[([^\]]*)\]|[^\s|]+/;
+/** Either mark — *a note* or a ^^blinking cue^^. Each is held to a single line
+ *  so a stray asterisk or caret can't run away with the rest of the chart.
+ *  Notes come first only for tidiness: the two delimiters can't overlap, so
+ *  the order between them never decides a match. */
+const MARK_RE = /\*[^*\n]+\*|\^\^[^^\n]+\^\^/;
+
+/** The mark a matched run was written with, or null if it isn't one. */
+function markOf(raw: string): Marked | null {
+  if (raw.length > 4 && raw.startsWith('^^') && raw.endsWith('^^')) {
+    return { note: true, blink: true };
+  }
+  // A bare token can start with a stray asterisk, so both ends must agree
+  // before this counts as a note.
+  if (raw.length > 1 && raw.startsWith('*') && raw.endsWith('*')) return { note: true };
+  return null;
+}
+
+/** Strips a mark's delimiters off the text it wraps. */
+const unwrap = (raw: string, mark: Marked) => raw.slice(mark.blink ? 2 : 1, mark.blink ? -2 : -1);
+/** One token on a chord row: a mark, a bracketed chord, a bar, or a bare run.
+ *  Bars are tokens in their own right so "| G | C |" renders as the notation it
+ *  was written as — they used to fall through the tokenizer and vanish, which
+ *  left the bar chart in the placeholder rendering as a bare "G C". */
+const CHORD_TOKEN_RE = /\*[^*\n]+\*|\^\^[^^\n]+\^\^|\[([^\]]*)\]|\||[^\s|]+/;
+
+/** A bar is punctuation, never something played. Every judgement about whether
+ *  a line *is* a chord row ignores bars — as it did when they were dropped. */
+const isBar = (t: ChordToken) => t.text === '|';
+
+/** Structural punctuation: bar lines, dashes, and the brackets around an
+ *  implied chord. It frames what you play or sing without being either, so
+ *  every renderer fades it back rather than letting it compete. */
+const PUNCT_RE = /[|\-()]+/g;
+
+/** A stretch of text, flagged when it is structural punctuation. */
+export interface PunctRun {
+  text: string;
+  punct: boolean;
+}
+
+/** Splits text into what's played or sung and the scaffolding around it. */
+export function punctRuns(text: string): PunctRun[] {
+  const out: PunctRun[] = [];
+  const re = scan(PUNCT_RE);
+  let last = 0;
+  let m: RegExpExecArray | null;
+
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push({ text: text.slice(last, m.index), punct: false });
+    out.push({ text: m[0], punct: true });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ text: text.slice(last), punct: false });
+  return out;
+}
 
 /** A chord row token, with the column its text starts at. */
 interface Anchored extends ChordToken {
@@ -80,17 +149,17 @@ interface Anchored extends ChordToken {
  *  callers. */
 const scan = (re: RegExp) => new RegExp(re.source, 'g');
 
-/** Blanks out notes, keeping every other column where it was. Lets the chord
- *  patterns above be written without knowing about notes at all. */
-function stripNotes(line: string): string {
-  return line.replace(scan(NOTE_RE), (m) => ' '.repeat(m.length));
+/** Blanks out marked text, keeping every other column where it was. Lets the
+ *  chord patterns above be written without knowing about marks at all. */
+function stripMarks(line: string): string {
+  return line.replace(scan(MARK_RE), (m) => ' '.repeat(m.length));
 }
 
 type LineKind =
   | { kind: 'blank' }
   | { kind: 'comment' }
   | { kind: 'section'; name: string }
-  | { kind: 'heading'; text: string; level: 2 | 3 }
+  | { kind: 'heading'; text: string; level: HeadingLevel }
   | { kind: 'chords' }
   | { kind: 'lyrics' };
 
@@ -102,12 +171,15 @@ type LineKind =
 function classifyLine(line: string): LineKind {
   if (!line.trim()) return { kind: 'blank' };
 
-  // Markdown-style headings for oversized text: "## Big" and "### smaller".
-  // Checked before comments because they share the # sigil — a single # keeps
-  // its long-standing meaning as a comment line.
+  // Markdown-style headings for oversized text: "##", "###" and "####", each a
+  // size down. Checked before comments because they share the # sigil — a
+  // single # keeps its long-standing meaning as a comment line. Anything
+  // deeper than four bottoms out at the smallest rather than becoming a
+  // heading nobody can see.
   const heading = /^(##+)\s*(.+)$/.exec(line.trim());
   if (heading) {
-    return { kind: 'heading', text: heading[2], level: heading[1].length === 2 ? 2 : 3 };
+    const level = Math.min(heading[1].length, 4) as HeadingLevel;
+    return { kind: 'heading', text: heading[2], level };
   }
 
   if (line.trimStart().startsWith('#')) return { kind: 'comment' };
@@ -130,13 +202,13 @@ function classifyLine(line: string): LineKind {
  * an annotation has no lyric to be inline against either.
  */
 function isChordRow(line: string): boolean {
-  const tokens = chordTokens(line);
+  const tokens = chordTokens(line).filter((t) => !isBar(t));
   if (!tokens.length) return false;
 
   const chords = tokens.filter((t) => !t.note);
   if (!chords.length) return true;
 
-  const bare = stripNotes(line);
+  const bare = stripMarks(line);
   // Brackets around every chord say outright that this is a chord row.
   if (BRACKET_LINE_RE.test(bare.trim())) return true;
   if (line.includes('[')) return false;
@@ -159,10 +231,9 @@ function chordTokens(line: string): Anchored[] {
 
   while ((match = re.exec(line)) !== null) {
     const raw = match[0];
-    // A bare token can start with a stray asterisk, so both ends must agree
-    // before this counts as a note.
-    if (raw.length > 1 && raw.startsWith('*') && raw.endsWith('*')) {
-      out.push({ text: raw.slice(1, -1), note: true, col: match.index });
+    const mark = markOf(raw);
+    if (mark) {
+      out.push({ text: unwrap(raw, mark), note: true, ...mark, col: match.index });
       continue;
     }
     const text = match[1] ?? raw;
@@ -206,7 +277,11 @@ function anchorToLyric(chords: Anchored[], lyric: string): ChordPair[] {
   chords.forEach((c, i) => {
     const end = i + 1 < chords.length ? chords[i + 1].col : lyric.length;
     const lyricAt = lyric.slice(c.col, end);
-    pairs.push(c.note ? { chord: c.text, lyric: lyricAt, note: true } : { chord: c.text, lyric: lyricAt });
+    pairs.push(
+      c.note
+        ? { chord: c.text, lyric: lyricAt, note: true, ...(c.blink ? { blink: c.blink } : null) }
+        : { chord: c.text, lyric: lyricAt },
+    );
   });
 
   return pairs;
@@ -247,7 +322,8 @@ export function parseSong(content: string): ParsedSong {
       case 'chords':
         lines.push({
           type: 'chords',
-          chords: chordTokens(line).map(({ text, note }) => ({ text, note })),
+          // Everything but the column, which only matters while anchoring.
+          chords: chordTokens(line).map(({ col, ...token }) => token),
         });
         break;
       case 'lyrics':
@@ -368,7 +444,7 @@ export function transposeContent(content: string, fromKey: string, toKey: string
     .map((line) => {
       switch (classifyLine(line).kind) {
         case 'lyrics':
-          return outsideNotes(line, (part) =>
+          return outsideMarks(line, (part) =>
             part.replace(/\[([^\]]*)\]/g, (whole, chord: string) =>
               chord ? `[${transposeChordToKey(chord, fromKey, toKey)}]` : whole,
             ),
@@ -377,7 +453,7 @@ export function transposeContent(content: string, fromKey: string, toKey: string
           // Bar charts carry their own structure; replacing token-wise keeps
           // every bar exactly where the author put it.
           if (line.includes('|')) {
-            return outsideNotes(line, (part) =>
+            return outsideMarks(line, (part) =>
               part.replace(/[^\s|]+/g, (token) => transposeChordToKey(token, fromKey, toKey)),
             );
           }
@@ -405,22 +481,26 @@ function respaceChordLine(line: string, fromKey: string, toKey: string): string 
   const moved = chordTokens(line).map((t) =>
     t.note ? t : { ...t, text: transposeChordToKey(t.text, fromKey, toKey) },
   );
-  return layOutChords(moved, BRACKET_LINE_RE.test(stripNotes(line).trim()));
+  return layOutChords(moved, BRACKET_LINE_RE.test(stripMarks(line).trim()));
 }
 
 /** Writes a chord row out at its columns, nudging right only when one won't
- *  fit. Notes keep their asterisks so the row reads back the same way. */
+ *  fit. Marks keep their delimiters so the row reads back the same way. */
 function layOutChords(anchors: Anchored[], bracketed: boolean): string {
   return anchors.reduce((out, a) => {
-    const text = a.note ? `*${a.text}*` : bracketed ? `[${a.text}]` : a.text;
+    const text = a.note ? rewrap(a) : bracketed ? `[${a.text}]` : a.text;
     return out + ' '.repeat(Math.max(a.col - out.length, out ? 1 : 0)) + text;
   }, '');
 }
 
-/** Runs `fn` over the stretches of a line that sit outside any *note*, so an
+/** Puts a mark's delimiters back on, so what was parsed can be written out
+ *  again byte for byte. */
+const rewrap = (m: Marked & { text: string }) => (m.blink ? `^^${m.text}^^` : `*${m.text}*`);
+
+/** Runs `fn` over the stretches of a line that sit outside any mark, so an
  *  aside like "*capo 2, G shapes*" never has its words transposed. */
-function outsideNotes(line: string, fn: (part: string) => string): string {
-  const re = scan(NOTE_RE);
+function outsideMarks(line: string, fn: (part: string) => string): string {
+  const re = scan(MARK_RE);
   let out = '';
   let at = 0;
   let match: RegExpExecArray | null;
@@ -442,30 +522,49 @@ function outsideNotes(line: string, fn: (part: string) => string): string {
  */
 export function lyricRuns(pairs: ChordPair[]): TextRun[][] {
   const full = pairs.map((p) => p.lyric).join('');
-  if (!full.includes('*')) {
+  if (!full.includes('*') && !full.includes('^')) {
     return pairs.map((p) => (p.lyric ? [{ text: p.lyric, note: false }] : []));
   }
 
-  // 0 = plain, 1 = inside a note, -1 = an asterisk to drop.
-  const marks = new Array<number>(full.length).fill(0);
-  const re = scan(NOTE_RE);
+  // Per character: PLAIN, NOTE, BLINK, or DROP for a delimiter that shouldn't
+  // reach the page. A delimiter is one character for *, two for ^^.
+  const PLAIN = 0;
+  const DROP = -1;
+  const kinds = new Array<number>(full.length).fill(PLAIN);
+  const re = scan(MARK_RE);
   let match: RegExpExecArray | null;
   while ((match = re.exec(full)) !== null) {
-    const end = match.index + match[0].length;
-    marks[match.index] = -1;
-    marks[end - 1] = -1;
-    for (let i = match.index + 1; i < end - 1; i++) marks[i] = 1;
+    const mark = markOf(match[0]);
+    if (!mark) continue;
+    const width = mark.blink ? 2 : 1;
+    const start = match.index;
+    const end = start + match[0].length;
+    for (let i = 0; i < width; i++) {
+      kinds[start + i] = DROP;
+      kinds[end - 1 - i] = DROP;
+    }
+    for (let i = start + width; i < end - width; i++) kinds[i] = mark.blink ? 2 : 1;
   }
+
+  const runOf = (kind: number): TextRun =>
+    kind === 2 ? { text: '', note: true, blink: true } : { text: '', note: kind === 1 };
 
   let at = 0;
   return pairs.map((p) => {
     const runs: TextRun[] = [];
+    let openKind = PLAIN;
     for (let i = 0; i < p.lyric.length; i++) {
-      const mark = marks[at++];
-      if (mark === -1) continue;
+      const kind = kinds[at++];
+      if (kind === DROP) continue;
       const last = runs[runs.length - 1];
-      if (last && last.note === (mark === 1)) last.text += p.lyric[i];
-      else runs.push({ text: p.lyric[i], note: mark === 1 });
+      if (last && openKind === kind) {
+        last.text += p.lyric[i];
+      } else {
+        const run = runOf(kind);
+        run.text = p.lyric[i];
+        runs.push(run);
+        openKind = kind;
+      }
     }
     return runs;
   });
@@ -511,7 +610,14 @@ function alignPairs(pairs: ChordPair[]): [string, string] {
   const anchors: Anchored[] = [];
   let lyric = '';
   for (const p of pairs) {
-    if (p.chord) anchors.push({ text: p.chord, note: !!p.note, col: lyric.length });
+    if (p.chord) {
+      anchors.push({
+        text: p.chord,
+        note: !!p.note,
+        ...(p.blink ? { blink: p.blink } : null),
+        col: lyric.length,
+      });
+    }
     lyric += p.lyric;
   }
 
@@ -543,9 +649,9 @@ export function toChordPro(song: ParsedSong): string {
         case 'heading':
           return `${'#'.repeat(line.level)} ${line.text}`;
         case 'chords':
-          return line.chords.map((t) => (t.note ? `*${t.text}*` : t.text)).join(' ');
+          return line.chords.map((t) => (t.note ? rewrap(t) : t.text)).join(' ');
         case 'lyrics':
-          // A note in the chord slot has no inline spelling — [*hold*] would
+          // A mark in the chord slot has no inline spelling — [*hold*] would
           // read back as a chord named "*hold*". Lines carrying one are
           // written in the two-row form, which can say exactly that.
           return line.pairs.some((p) => p.note)
