@@ -5,7 +5,7 @@ import { ArrowLeft } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import api, { apiError } from '@/lib/api';
-import { KEYS } from '@/lib/chords';
+import { KEYS, normalizeKey } from '@/lib/chords';
 import { useKeyConvert } from '@/lib/useKeyConvert';
 import ChartEditorPanels, { KeyConvertBanner } from '@/components/ChartEditorPanels';
 import { Field, Select } from '@/components/FormControls';
@@ -55,12 +55,13 @@ export default function SetlistItemEditor() {
           return;
         }
         setSetlistName(data.setlist.name);
-        setContentKey(item.key ?? '');
+        // Respelled the app's way on the way in, the same as SongEditor does.
+        setContentKey(normalizeKey(item.key ?? ''));
         setNoteCards(item.noteCards ?? []);
         setForm({
           title: item.title,
           artist: item.artist,
-          key: item.key ?? '',
+          key: normalizeKey(item.key ?? ''),
           timeSignature: item.timeSignature,
           tempo: item.tempo?.toString() ?? '',
           feel: item.feel,

@@ -89,6 +89,7 @@ export default function SongView() {
         noteCards: cards,
         fontSize: fontSize * 0.75,
         showChords,
+        columns: song.chartColumns,
       });
     } catch (err) {
       setError(apiError(err, 'Could not build the PDF'));

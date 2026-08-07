@@ -1,6 +1,6 @@
 import { Button, HStack, Text } from '@chakra-ui/react';
 import { Minus, Plus, RotateCcw } from 'lucide-react';
-import { keyOptions, semitonesBetween } from '@/lib/chords';
+import { keyOptions, normalizeKey, semitonesBetween } from '@/lib/chords';
 
 interface Props {
   /** The song's own key — what the stored chords are written in. */
@@ -29,8 +29,11 @@ export default function KeySelector({ originalKey, value, onChange }: Props) {
         <Minus size={14} />
       </Button>
 
+      {/* Matched on the app's spelling, not the stored one: a song saved as
+          "Ab" is the same pitch as the "G#" this list offers, and without the
+          respelling the dropdown would show a key nobody picked. */}
       <select
-        value={value}
+        value={normalizeKey(value)}
         onChange={(e) => onChange(e.target.value)}
         style={{
           padding: '6px 10px',

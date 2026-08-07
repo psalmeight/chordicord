@@ -14,7 +14,7 @@
 import { jsPDF } from 'jspdf';
 import {
   isMarked, lyricRuns, markRuns, parseSong, punctRuns, transposeSong,
-  type HeadingLevel, type Line, type Marked, type TextRun,
+  type HeadingLevel, type Line, type Marked, type ParsedSong, type TextRun,
 } from './chordpro';
 import { sectionKey } from './noteColors';
 import type { NoteCard } from '@/types';
@@ -26,6 +26,8 @@ const PAGE_H = 841.89;
 const MARGIN = { top: 46, right: 40, bottom: 46, left: 40 };
 const CONTENT_W = PAGE_W - MARGIN.left - MARGIN.right;
 const PAGE_BOTTOM = PAGE_H - MARGIN.bottom;
+/** Space between columns when a chart is printed two-up. */
+const GUTTER = 26;
 
 /* ── Palette, tracking the on-screen theme ─────────────────────────────── */
 
@@ -79,15 +81,39 @@ export interface PdfSong {
   /** Chart body size in points. Defaults to 11. */
   fontSize?: number;
   showChords?: boolean;
+  /** Columns to flow the chart into, 1 or 2 — the song's own setting. Two
+   *  falls back to one when the chart's lines are too wide to fit. */
+  columns?: number;
 }
 
 /* ── Drawing context ───────────────────────────────────────────────────── */
 
+/**
+ * Where the next block goes.
+ *
+ * Everything draws into the current column rather than the page, so the same
+ * routines lay out a full-width block and a two-up chart. In one column `x`
+ * and `w` are simply the page's own margins and width.
+ */
 interface Ctx {
   doc: jsPDF;
   /** Top of the next block. */
   y: number;
+  /** Left edge of the column being filled. */
+  x: number;
+  /** Width of the column being filled. */
+  w: number;
+  /** Columns the flow runs in, and which one is being filled (0-based). */
+  cols: number;
+  col: number;
+  /** Where a column starts on this page — below the song header on the first
+   *  page of a song, at the top margin on every page after it. */
+  top: number;
 }
+
+const newCtx = (doc: jsPDF): Ctx => ({
+  doc, y: MARGIN.top, x: MARGIN.left, w: CONTENT_W, cols: 1, col: 0, top: MARGIN.top,
+});
 
 type Weight = 'normal' | 'bold' | 'italic' | 'bolditalic';
 
@@ -122,15 +148,60 @@ const baseline = (top: number, size: number) => top + size * 0.8;
 
 function newPage(ctx: Ctx) {
   ctx.doc.addPage();
+  ctx.col = 0;
+  ctx.x = MARGIN.left;
+  ctx.top = MARGIN.top;
   ctx.y = MARGIN.top;
 }
 
-/** Starts a new page unless `height` still fits under the current one. */
-function ensure(ctx: Ctx, height: number) {
-  if (ctx.y > MARGIN.top && ctx.y + height > PAGE_BOTTOM) newPage(ctx);
+/**
+ * Flows the rest of this song into `cols` columns, starting here.
+ *
+ * The columns hang off the current cursor, so a chart printed two-up begins
+ * under its own header rather than beside it.
+ */
+function startColumns(ctx: Ctx, cols: number) {
+  ctx.cols = cols;
+  ctx.col = 0;
+  ctx.x = MARGIN.left;
+  ctx.w = columnWidth(cols);
+  ctx.top = ctx.y;
 }
 
-/** Space left on the page below the cursor. */
+/** Back to one full-width column, at the foot of whatever was drawn. */
+function endColumns(ctx: Ctx) {
+  ctx.cols = 1;
+  ctx.col = 0;
+  ctx.x = MARGIN.left;
+  ctx.w = CONTENT_W;
+}
+
+const columnWidth = (cols: number) => (CONTENT_W - GUTTER * (cols - 1)) / cols;
+
+/**
+ * The bottom of the column has been reached.
+ *
+ * Filling is vertical first: a column runs from its top to the bottom of the
+ * page, then the next column across takes over, and only when the last one is
+ * full does a new page start. Nothing is balanced — verse 2 follows verse 1
+ * down the page, not across it.
+ */
+function columnBreak(ctx: Ctx) {
+  if (ctx.col + 1 < ctx.cols) {
+    ctx.col += 1;
+    ctx.x = MARGIN.left + ctx.col * (ctx.w + GUTTER);
+    ctx.y = ctx.top;
+    return;
+  }
+  newPage(ctx);
+}
+
+/** Moves on to the next column or page unless `height` still fits in this one. */
+function ensure(ctx: Ctx, height: number) {
+  if (ctx.y > ctx.top && ctx.y + height > PAGE_BOTTOM) columnBreak(ctx);
+}
+
+/** Space left in the column below the cursor. */
 const room = (ctx: Ctx) => PAGE_BOTTOM - ctx.y;
 
 /** PDF standard fonts encode Latin-1/WinAnsi; a stray control character would
@@ -152,7 +223,7 @@ const CARD_BAR = 3;
 function drawNoteCard(ctx: Ctx, card: NoteCard, size: number) {
   const c = cardColor(card.color);
   const lineH = size * 1.35;
-  const textW = CONTENT_W - CARD_BAR - CARD_PAD_X * 2;
+  const textW = ctx.w - CARD_BAR - CARD_PAD_X * 2;
 
   style(ctx, size, 'normal', c.fg);
   const lines: string[] = ctx.doc.splitTextToSize(safe(card.text), textW);
@@ -167,13 +238,13 @@ function drawNoteCard(ctx: Ctx, card: NoteCard, size: number) {
     const h = chunk.length * lineH + CARD_PAD_Y * 2;
 
     ctx.doc.setFillColor(c.bg);
-    ctx.doc.rect(MARGIN.left, ctx.y, CONTENT_W, h, 'F');
+    ctx.doc.rect(ctx.x, ctx.y, ctx.w, h, 'F');
     ctx.doc.setFillColor(c.border);
-    ctx.doc.rect(MARGIN.left, ctx.y, CARD_BAR, h, 'F');
+    ctx.doc.rect(ctx.x, ctx.y, CARD_BAR, h, 'F');
 
     style(ctx, size, 'normal', c.fg);
     chunk.forEach((line, i) => {
-      ctx.doc.text(line, MARGIN.left + CARD_BAR + CARD_PAD_X, baseline(ctx.y + CARD_PAD_Y + i * lineH, size));
+      ctx.doc.text(line, ctx.x + CARD_BAR + CARD_PAD_X, baseline(ctx.y + CARD_PAD_Y + i * lineH, size));
     });
 
     ctx.y += h;
@@ -294,7 +365,7 @@ function drawCellRow(ctx: Ctx, row: Cell[], size: number, chordSize: number, sho
 
   ensure(ctx, chordH + lyricH);
 
-  let x = MARGIN.left;
+  let x = ctx.x;
   for (const cell of row) {
     if (hasChord && cell.chord) {
       const ink = cell.chordMarked ? RED : BLUE;
@@ -326,7 +397,7 @@ function drawLyricLine(ctx: Ctx, line: Extract<Line, { type: 'lyrics' }>, size: 
   let row: Cell[] = [];
   let rowW = 0;
   for (const cell of cells) {
-    if (row.length && rowW + cell.width > CONTENT_W) {
+    if (row.length && rowW + cell.width > ctx.w) {
       drawCellRow(ctx, row, size, chordSize, showChords);
       row = [];
       rowW = 0;
@@ -340,8 +411,8 @@ function drawLyricLine(ctx: Ctx, line: Extract<Line, { type: 'lyrics' }>, size: 
 /** A bar chart or standalone chord row — its own notation, wrapped by token. */
 function drawChordLine(ctx: Ctx, line: Extract<Line, { type: 'chords' }>, chordSize: number) {
   const lineH = chordSize * 1.4;
-  let x = MARGIN.left;
   ensure(ctx, lineH);
+  let x = ctx.x;
 
   for (const token of line.chords) {
     const ink = isMarked(token) ? RED : BLUE;
@@ -350,10 +421,11 @@ function drawChordLine(ctx: Ctx, line: Extract<Line, { type: 'chords' }>, chordS
     // Measured on what will be drawn: a phrase carrying "^^G^^" loses four
     // characters between here and the page, and the wrap test has to know.
     const w = widthOf(ctx, slotText(token.text));
-    if (x > MARGIN.left && x + w > MARGIN.left + CONTENT_W) {
+    if (x > ctx.x && x + w > ctx.x + ctx.w) {
       ctx.y += lineH;
       ensure(ctx, lineH);
-      x = MARGIN.left;
+      // Re-read after ensure: a break here moves the row into the next column.
+      x = ctx.x;
       setFont();
     }
     if (token.note) ctx.doc.text(safe(token.text), x, baseline(ctx.y, chordSize));
@@ -371,15 +443,74 @@ function drawSection(ctx: Ctx, name: string, size: number, first: boolean) {
   // it, so it only stays if a chord row and its lyric fit under it too.
   ensure(ctx, lineH + size * 2.5);
   style(ctx, s, 'bold', BLUE);
-  ctx.doc.text(safe(name.toUpperCase()), MARGIN.left, baseline(ctx.y, s), { charSpace: 0.6 });
+  ctx.doc.text(safe(name.toUpperCase()), ctx.x, baseline(ctx.y, s), { charSpace: 0.6 });
   ctx.y += lineH;
 }
 
+/**
+ * How wide the chart wants to be — its longest line that can't be broken.
+ *
+ * A line carrying chords is measured whole: wrapping it drops half the chords
+ * onto a row of their own, away from the line they were written against. Bare
+ * lyrics, note cards and headings are prose that wraps to whatever width it is
+ * given, so none of them gets a say in whether the chart fits two columns.
+ */
+function naturalWidth(ctx: Ctx, song: ParsedSong, size: number, chordSize: number, showChords: boolean): number {
+  let widest = 0;
+  for (const line of song.lines) {
+    if (line.type === 'lyrics' && line.pairs.some((p) => p.chord)) {
+      widest = Math.max(widest, lyricCells(ctx, line, size, chordSize).reduce((w, c) => w + c.width, 0));
+    } else if (line.type === 'chords' && showChords) {
+      style(ctx, chordSize, 'bold', BLUE);
+      const w = line.chords.reduce((sum, t) => sum + widthOf(ctx, slotText(t.text)) + TOKEN_GAP, 0);
+      widest = Math.max(widest, w - TOKEN_GAP);
+    }
+  }
+  return widest;
+}
+
+/**
+ * The smallest the chart body may be shrunk to make two columns fit.
+ *
+ * Some shrinking is the point — two columns exist to get more of a song onto
+ * one sheet. Past this it stops being readable at a music stand, and a single
+ * full-width column at the size that was asked for is the better print.
+ */
+const MIN_COLUMN_SCALE = 0.8;
+
+/**
+ * The column count and body size to print this chart at.
+ *
+ * A chart's lines are never re-wrapped by choice — a chord sits over its own
+ * syllable, and folding a line in half moves it. So two columns are only
+ * honoured when the longest line fits one, shrinking the body a little if
+ * that's all it takes and falling back to a single column when it isn't. This
+ * is the print equivalent of ChordChart dropping to one column on a narrow
+ * screen.
+ */
+function fitColumns(ctx: Ctx, song: ParsedSong, size: number, showChords: boolean): { cols: number; size: number } {
+  const wanted = 2;
+  const natural = naturalWidth(ctx, song, size, size * 0.94, showChords);
+  if (!natural) return { cols: wanted, size };
+
+  const scale = columnWidth(wanted) / natural;
+  if (scale >= 1) return { cols: wanted, size };
+  if (scale >= MIN_COLUMN_SCALE) return { cols: wanted, size: size * scale };
+  return { cols: 1, size };
+}
+
 function drawChart(ctx: Ctx, song: PdfSong) {
-  const size = song.fontSize ?? 11;
-  const chordSize = size * 0.94;
   const showChords = song.showChords !== false;
   const parsed = transposeSong(parseSong(song.content), song.fromKey, song.toKey);
+
+  const fit = song.columns === 2
+    ? fitColumns(ctx, parsed, song.fontSize ?? 11, showChords)
+    : { cols: 1, size: song.fontSize ?? 11 };
+  const size = fit.size;
+  const chordSize = size * 0.94;
+
+  startColumns(ctx, fit.cols);
+
   const sections = groupSectionNotes(song.noteCards);
   const shown = new Set<string>();
 
@@ -405,7 +536,7 @@ function drawChart(ctx: Ctx, song: PdfSong) {
         const lineH = hs * 1.4;
         ensure(ctx, lineH);
         style(ctx, hs, 'bold', INK);
-        ctx.doc.text(safe(line.text), MARGIN.left, baseline(ctx.y + 2, hs));
+        ctx.doc.text(safe(line.text), ctx.x, baseline(ctx.y + 2, hs));
         ctx.y += lineH + 2;
         break;
       }
@@ -417,6 +548,8 @@ function drawChart(ctx: Ctx, song: PdfSong) {
         break;
     }
   });
+
+  endColumns(ctx);
 }
 
 /** Section-anchored note cards, keyed the same way ChordChart keys them. */
@@ -591,7 +724,7 @@ export function slug(text: string, fallback = 'chart'): string {
 /** One song as its own document. */
 export function songPdf(song: PdfSong): jsPDF {
   const doc = newDoc();
-  const ctx: Ctx = { doc, y: MARGIN.top };
+  const ctx = newCtx(doc);
   drawSong(ctx, { ...song, index: undefined });
   drawFooters(doc, song.title);
   return doc;
@@ -603,7 +736,7 @@ export function songPdf(song: PdfSong): jsPDF {
  */
 export function setlistPdf(cover: Cover, songs: PdfSong[]): jsPDF {
   const doc = newDoc();
-  const ctx: Ctx = { doc, y: MARGIN.top };
+  const ctx = newCtx(doc);
 
   drawCover(ctx, cover, songs);
 

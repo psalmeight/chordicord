@@ -85,6 +85,15 @@ body {
   }
   .chart {
     font-size: 11pt;
+    /* A two-column chart fills the first column to the foot of the page and
+       only then starts the second — verse 2 under verse 1, not beside it. The
+       default balances the pair, which on paper reads as a chart sawn in half
+       with half a page of white under each side. Matches how lib/pdf.ts flows
+       the downloaded PDF. */
+    column-fill: auto;
+    /* Sideways scrolling is a screen affordance. On paper the same overflow
+       silently clips whatever ran past the edge. */
+    overflow: visible !important;
   }
   /* Paper can't blink; it would print at whichever frame the browser stopped
      on, which could be the faded one. */

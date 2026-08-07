@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import api, { apiError } from '@/lib/api';
 import { canEdit } from '@/lib/auth';
-import { KEYS } from '@/lib/chords';
+import { KEYS, normalizeKey } from '@/lib/chords';
 import { useKeyConvert } from '@/lib/useKeyConvert';
 import { useApp } from '@/contexts/AppContext';
 import AudioPlayer from '@/components/AudioPlayer';
@@ -65,7 +65,10 @@ export default function SongEditor() {
     api
       .get<Song>(`/api/songs/${id}`)
       .then(({ data }) => {
-        setContentKey(data.key ?? '');
+        // Respelled on the way in, both here and on the form, so a song saved
+        // as "Ab" shows "G#" — the same key — without the two disagreeing and
+        // offering to convert a chart that hasn't moved.
+        setContentKey(normalizeKey(data.key ?? ''));
         setHasAudio(data.hasAudio);
         setNoteCards(
           data.noteCards?.length
@@ -77,7 +80,7 @@ export default function SongEditor() {
         setForm({
           title: data.title,
           artist: data.artist,
-          key: data.key ?? '',
+          key: normalizeKey(data.key ?? ''),
           timeSignature: data.timeSignature,
           tempo: data.tempo?.toString() ?? '',
           feel: data.feel,

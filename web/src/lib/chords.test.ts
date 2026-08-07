@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { capoKey, parseChord, signedSemitones, transposeChord, transposeChordToKey } from './chords';
+import {
+  capoKey, normalizeKey, parseChord, signedSemitones, transposeChord, transposeChordToKey,
+} from './chords';
 import {
   hasChords, hasInlineChords, lyricRuns, markRuns, parseSong, punctRuns, toAligned, toChordPro,
   transposeContent, transposeSong,
@@ -37,32 +39,41 @@ describe('parseChord', () => {
 
 describe('transposeChord', () => {
   it('shifts by semitones', () => {
-    expect(transposeChord('C', 2, false)).toBe('D');
-    expect(transposeChord('Am7', 3, false)).toBe('Cm7');
+    expect(transposeChord('C', 2)).toBe('D');
+    expect(transposeChord('Am7', 3)).toBe('Cm7');
   });
 
   it('transposes the bass of a slash chord too', () => {
-    expect(transposeChord('G/B', 2, false)).toBe('A/C#');
+    expect(transposeChord('G/B', 2)).toBe('A/C#');
   });
 
   it('transposes an implied chord and keeps its parens', () => {
-    expect(transposeChord('(C)', 2, false)).toBe('(D)');
-    expect(transposeChord('(Am7/D)', 2, false)).toBe('(Bm7/E)');
+    expect(transposeChord('(C)', 2)).toBe('(D)');
+    expect(transposeChord('(Am7/D)', 2)).toBe('(Bm7/E)');
   });
 
   it('wraps around the octave', () => {
-    expect(transposeChord('B', 1, false)).toBe('C');
+    expect(transposeChord('B', 1)).toBe('C');
   });
 });
 
 describe('transposeChordToKey', () => {
-  it('spells flat keys with flats', () => {
-    // C -> Eb is +3. A# would be wrong here; Bb is how the key is written.
+  it('uses one spelling per pitch, whatever the key', () => {
+    // The five accidentals players actually say: C#, Eb, F#, G#, Bb — never
+    // Db, D#, Gb, Ab or A#, and the same in a sharp key as in a flat one.
     expect(transposeChordToKey('G', 'C', 'Eb')).toBe('Bb');
     expect(transposeChordToKey('Am', 'C', 'Eb')).toBe('Cm');
+    expect(transposeChordToKey('C', 'C', 'Eb')).toBe('Eb');
+    expect(transposeChordToKey('D', 'C', 'Eb')).toBe('F');
+    expect(transposeChordToKey('A', 'C', 'Eb')).toBe('C');
+    // E major would strictly write D#; the chart says Eb either way.
+    expect(transposeChordToKey('C', 'C', 'E')).toBe('E');
+    expect(transposeChordToKey('B', 'C', 'E')).toBe('Eb');
+    expect(transposeChordToKey('C', 'C', 'G#')).toBe('G#');
+    expect(transposeChordToKey('D', 'C', 'G#')).toBe('Bb');
   });
 
-  it('spells sharp keys with sharps', () => {
+  it('moves a chord by the interval between the two keys', () => {
     expect(transposeChordToKey('C', 'C', 'D')).toBe('D');
     expect(transposeChordToKey('A', 'C', 'D')).toBe('B');
     expect(transposeChordToKey('G', 'C', 'A')).toBe('E');
@@ -76,6 +87,22 @@ describe('transposeChordToKey', () => {
     const original = 'Cmaj7';
     const moved = transposeChordToKey(original, 'C', 'F#');
     expect(transposeChordToKey(moved, 'F#', 'C')).toBe(original);
+  });
+});
+
+describe('normalizeKey', () => {
+  it('respells a key stored the other way round', () => {
+    expect(normalizeKey('Ab')).toBe('G#');
+    expect(normalizeKey('Db')).toBe('C#');
+    expect(normalizeKey('D#')).toBe('Eb');
+    expect(normalizeKey('Gb')).toBe('F#');
+    expect(normalizeKey('A#m')).toBe('Bbm');
+  });
+
+  it('leaves keys already spelled that way, and anything unparseable, alone', () => {
+    for (const key of ['C', 'F#m', 'Bb', '', 'H', 'no idea']) {
+      expect(normalizeKey(key), key).toBe(key);
+    }
   });
 });
 

@@ -7,20 +7,24 @@
  * source of truth can't drift and any key can be reached from any other.
  */
 
-const SHARP_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-const FLAT_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+/**
+ * The one spelling every accidental gets, whatever key it lands in.
+ *
+ * Strict notation would pick sharps or flats from the key signature — Db in
+ * Ab, D# in E. These charts are read off a music stand, not engraved, and
+ * players call those chords C# and Eb wherever they turn up. One spelling also
+ * means one name per pitch: the same chord never reads two ways across a set
+ * because two songs were written in different keys.
+ */
+const NOTE_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'G#', 'A', 'Bb', 'B'];
 
 /** Semitone offset of each natural note from C. */
 const NATURALS: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 
-/**
- * Keys conventionally spelled with flats. Everything else gets sharps.
- * This is why transposing C→Eb yields "Bb" and not "A#".
- */
-const FLAT_KEYS = new Set(['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Cb', 'Dm', 'Gm', 'Cm', 'Fm', 'Bbm', 'Ebm']);
-
+/** The same twelve, major and minor. Anything else still parses — a song saved
+ *  as "Ab" before this settled reads fine — it just isn't offered. */
 export const KEYS = [
-  'C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B',
+  'C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'G#', 'A', 'Bb', 'B',
   'Am', 'Bbm', 'Bm', 'Cm', 'C#m', 'Dm', 'Ebm', 'Em', 'Fm', 'F#m', 'Gm', 'G#m',
 ];
 
@@ -80,9 +84,8 @@ export function noteToPitch(note: string): number | null {
   return ((pitch % 12) + 12) % 12;
 }
 
-function pitchToNote(pitch: number, preferFlats: boolean): string {
-  const names = preferFlats ? FLAT_NAMES : SHARP_NAMES;
-  return names[((pitch % 12) + 12) % 12];
+function pitchToNote(pitch: number): string {
+  return NOTE_NAMES[((pitch % 12) + 12) % 12];
 }
 
 /** Semitone distance to get from one key to another, normalised to 0-11. */
@@ -111,20 +114,26 @@ export function signedSemitones(fromKey: string, toKey: string): number {
   return up > 6 ? up - 12 : up;
 }
 
-/** True if the target key is conventionally written with flats. */
-export function keyPrefersFlats(key: string): boolean {
-  return FLAT_KEYS.has(key) || FLAT_KEYS.has(stripMinor(key));
+/**
+ * A key respelled the app's way, so a song stored as "Ab" or "D#" reads back
+ * as "G#" or "Eb". Anything that doesn't parse as a key is left alone.
+ */
+export function normalizeKey(key: string): string {
+  if (!key) return key;
+  const pitch = noteToPitch(stripMinor(key));
+  if (pitch === null) return key;
+  return pitchToNote(pitch) + (/m(in)?$/.test(key) ? 'm' : '');
 }
 
 /**
  * Transpose a single chord token by `semitones`. Returns the token unchanged
  * if it doesn't parse as a chord, so odd markings pass through untouched.
  */
-export function transposeChord(token: string, semitones: number, preferFlats: boolean): string {
+export function transposeChord(token: string, semitones: number): string {
   // "(C)" transposes as C and keeps its parens — parseChord unwraps them, so
   // rebuilding from its parts below would silently drop the notation.
   const paren = PAREN_WRAP_RE.exec(token.trim());
-  if (paren) return `(${transposeChord(paren[1], semitones, preferFlats)})`;
+  if (paren) return `(${transposeChord(paren[1], semitones)})`;
 
   const parsed = parseChord(token);
   if (!parsed) return token;
@@ -132,11 +141,11 @@ export function transposeChord(token: string, semitones: number, preferFlats: bo
   const rootPitch = noteToPitch(parsed.root);
   if (rootPitch === null) return token;
 
-  let out = pitchToNote(rootPitch + semitones, preferFlats) + parsed.suffix;
+  let out = pitchToNote(rootPitch + semitones) + parsed.suffix;
 
   if (parsed.bass) {
     const bassPitch = noteToPitch(parsed.bass);
-    out += '/' + (bassPitch === null ? parsed.bass : pitchToNote(bassPitch + semitones, preferFlats));
+    out += '/' + (bassPitch === null ? parsed.bass : pitchToNote(bassPitch + semitones));
   }
   return out;
 }
@@ -144,7 +153,7 @@ export function transposeChord(token: string, semitones: number, preferFlats: bo
 /** Transpose a chord from one key to another. */
 export function transposeChordToKey(token: string, fromKey: string, toKey: string): string {
   if (fromKey === toKey) return token;
-  return transposeChord(token, semitonesBetween(fromKey, toKey), keyPrefersFlats(toKey));
+  return transposeChord(token, semitonesBetween(fromKey, toKey));
 }
 
 /**
@@ -156,7 +165,7 @@ export function capoKey(key: string, capo: number): string {
   const minor = /m(in)?$/.test(key);
   const pitch = noteToPitch(stripMinor(key));
   if (pitch === null) return key;
-  const shaped = pitchToNote(pitch - capo, keyPrefersFlats(key));
+  const shaped = pitchToNote(pitch - capo);
   return minor ? shaped + 'm' : shaped;
 }
 
@@ -167,11 +176,7 @@ export function keyOptions(fromKey: string): Array<{ key: string; semitones: num
   if (base === null) return [];
 
   return Array.from({ length: 12 }, (_, semitones) => {
-    const pitch = base + semitones;
-    // Spell each candidate the way that key is normally written.
-    const sharp = pitchToNote(pitch, false) + (minor ? 'm' : '');
-    const flat = pitchToNote(pitch, true) + (minor ? 'm' : '');
-    const key = keyPrefersFlats(flat) ? flat : sharp;
+    const key = pitchToNote(base + semitones) + (minor ? 'm' : '');
     const offset = semitones > 6 ? semitones - 12 : semitones;
     // Same convention as signedSemitones, kept inline here because the loop
     // already has the raw offset.

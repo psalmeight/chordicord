@@ -32,6 +32,7 @@ const toPdfSong = (item: SetlistItem): PdfSong => ({
   feel: item.feel,
   content: item.content,
   noteCards: item.noteCards,
+  columns: item.chartColumns,
 });
 
 export default function SetlistView() {
