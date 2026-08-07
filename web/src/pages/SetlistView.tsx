@@ -12,7 +12,7 @@ import api, { apiError } from '@/lib/api';
 import { canEdit } from '@/lib/auth';
 import { capoKey, keyOptions, semitonesBetween } from '@/lib/chords';
 import { groupNotes } from '@/lib/noteColors';
-import type { PdfSong } from '@/lib/pdf';
+import type { Cover, PdfSong } from '@/lib/pdf';
 import { useApp } from '@/contexts/AppContext';
 import AudioPlayer from '@/components/AudioPlayer';
 import AutoScrollWidget from '@/components/AutoScrollWidget';
@@ -173,22 +173,27 @@ export default function SetlistView() {
     load();
   };
 
-  // The PDF renderer carries a typesetting library with it, so it is pulled in
-  // on the first download rather than on every page load.
-  const downloadPdf = async () => {
+  /** The running-order page at the front of the printed setlist. */
+  const cover = (): Cover => ({
+    title: setlist!.name,
+    subtitle: setlist!.serviceDate
+      ? dayjs(setlist!.serviceDate).format('dddd, D MMMM YYYY')
+      : undefined,
+    notes: setlist!.notes,
+  });
+
+  // Print and download build the same document — the printer gets the file,
+  // not the page, so what comes off it is the setlist as a chart book rather
+  // than a screenshot of this screen. The PDF renderer carries a typesetting
+  // library with it, so it is pulled in on the first press rather than on every
+  // page load.
+  const runPdf = async (action: 'save' | 'print') => {
     setPdfBusy(true);
     try {
-      const { downloadSetlistPdf } = await import('@/lib/pdf');
-      downloadSetlistPdf(
-        {
-          title: setlist!.name,
-          subtitle: setlist!.serviceDate
-            ? dayjs(setlist!.serviceDate).format('dddd, D MMMM YYYY')
-            : undefined,
-          notes: setlist!.notes,
-        },
-        items.map(toPdfSong),
-      );
+      const pdf = await import('@/lib/pdf');
+      const songs = items.map(toPdfSong);
+      if (action === 'save') pdf.downloadSetlistPdf(cover(), songs);
+      else pdf.printSetlistPdf(cover(), songs);
     } catch (err) {
       setError(apiError(err, 'Could not build the PDF'));
     } finally {
@@ -278,7 +283,14 @@ export default function SetlistView() {
           </Button>
         </Link>
         <HStack gap={2}>
-          <Button size="sm" variant="outline" onClick={() => window.print()}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={items.length === 0}
+            loading={pdfBusy}
+            onClick={() => runPdf('print')}
+            title="Print the whole setlist, a song per page"
+          >
             <Printer size={16} />
           </Button>
           <Button
@@ -286,7 +298,7 @@ export default function SetlistView() {
             variant="outline"
             disabled={items.length === 0}
             loading={pdfBusy}
-            onClick={downloadPdf}
+            onClick={() => runPdf('save')}
             title="Download the whole setlist as one PDF, a song per page"
           >
             <FileDown size={16} />

@@ -79,6 +79,9 @@ body {
   }
 }
 
+/* The print buttons don't print the page — they build the same PDF the
+   download button does and hand that to the printer (lib/pdf.ts). What's left
+   here is for the browser's own Ctrl/Cmd+P, which still prints the DOM. */
 @media print {
   .no-print {
     display: none !important;

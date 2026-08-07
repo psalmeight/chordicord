@@ -52,6 +52,14 @@ describe('songPdf', () => {
     expect(songPdf(song({ content: '' })).getNumberOfPages()).toBe(1);
   });
 
+  it('sets the page in a monospace face', () => {
+    const doc = songPdf(song());
+    expect(doc.getFont().fontName).toBe('courier');
+    // What monospace is actually for: every character advances the same width,
+    // so a chart prints on the grid it was typed on.
+    expect(doc.getTextWidth('MMMM')).toBe(doc.getTextWidth('ilil'));
+  });
+
   it('survives a note card longer than a page', () => {
     const doc = songPdf(
       song({ noteCards: [{ color: 'amber', text: 'word '.repeat(4000), section: '' }] }),

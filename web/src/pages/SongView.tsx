@@ -7,6 +7,7 @@ import { Link, useParams } from 'react-router-dom';
 import api, { apiError } from '@/lib/api';
 import { canEdit } from '@/lib/auth';
 import { capoKey } from '@/lib/chords';
+import type { PdfSong } from '@/lib/pdf';
 import { useApp } from '@/contexts/AppContext';
 import { useMetronome } from '@/contexts/MetronomeContext';
 import AudioPlayer from '@/components/AudioPlayer';
@@ -68,29 +69,35 @@ export default function SongView() {
   const notes = groupNotes(cards);
 
   // The file is a copy of what's on screen — chosen key, capo, size and chord
-  // visibility all carry through. The renderer carries a typesetting library
-  // with it, so it is pulled in on the first download rather than up front.
-  const downloadPdf = async () => {
+  // visibility all carry through.
+  const pdfSong = (): PdfSong => ({
+    title: song.title,
+    artist: song.artist,
+    fromKey: song.key ?? '',
+    toKey: hasKey ? chartKey : '',
+    soundingKey: displayKey,
+    capo,
+    timeSignature: song.timeSignature,
+    tempo: song.tempo,
+    feel: song.feel,
+    ccli: song.ccli,
+    content: song.content,
+    noteCards: cards,
+    fontSize: fontSize * 0.75,
+    showChords,
+    columns: song.chartColumns,
+  });
+
+  // Print and download build the same document — the printer gets the file,
+  // not the page — so a chart reads the same however it left the app. The
+  // renderer carries a typesetting library with it, so it is pulled in on the
+  // first press rather than up front.
+  const runPdf = async (action: 'save' | 'print') => {
     setPdfBusy(true);
     try {
-      const { downloadSongPdf } = await import('@/lib/pdf');
-      downloadSongPdf({
-        title: song.title,
-        artist: song.artist,
-        fromKey: song.key ?? '',
-        toKey: hasKey ? chartKey : '',
-        soundingKey: displayKey,
-        capo,
-        timeSignature: song.timeSignature,
-        tempo: song.tempo,
-        feel: song.feel,
-        ccli: song.ccli,
-        content: song.content,
-        noteCards: cards,
-        fontSize: fontSize * 0.75,
-        showChords,
-        columns: song.chartColumns,
-      });
+      const pdf = await import('@/lib/pdf');
+      if (action === 'save') pdf.downloadSongPdf(pdfSong());
+      else pdf.printSongPdf(pdfSong());
     } catch (err) {
       setError(apiError(err, 'Could not build the PDF'));
     } finally {
@@ -121,16 +128,22 @@ export default function SongView() {
           </Button>
         </Link>
         <HStack gap={2}>
-          <Button size="sm" variant="outline" onClick={() => window.print()}>
-            <Printer size={16} />
-          </Button>
-          {/* Prints exactly what's on screen: the chosen key, capo, size and
-              chord visibility all carry through to the file. */}
           <Button
             size="sm"
             variant="outline"
             loading={pdfBusy}
-            onClick={downloadPdf}
+            onClick={() => runPdf('print')}
+            title="Print this chart"
+          >
+            <Printer size={16} />
+          </Button>
+          {/* The same document the print button sends to the printer: the
+              chosen key, capo, size and chord visibility all carry through. */}
+          <Button
+            size="sm"
+            variant="outline"
+            loading={pdfBusy}
+            onClick={() => runPdf('save')}
             title="Download this chart as a PDF"
           >
             <FileDown size={16} />

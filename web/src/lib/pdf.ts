@@ -9,6 +9,10 @@
  * The layout mirrors ChordChart — a chord sits in its own row above the
  * syllable it was written over, and each chord+syllable pair is a column that
  * wraps as a unit, so a wide chord name never shifts a lyric.
+ *
+ * This is also what the print button produces: printing goes through the same
+ * document rather than through window.print() on the page, so a chart comes off
+ * a printer exactly as it comes out of the file.
  */
 
 import { jsPDF } from 'jspdf';
@@ -18,6 +22,19 @@ import {
 } from './chordpro';
 import { sectionKey } from './noteColors';
 import type { NoteCard } from '@/types';
+
+/* ── Typeface ──────────────────────────────────────────────────────────── */
+
+/**
+ * Courier — the one monospace face jsPDF carries without embedding anything.
+ *
+ * Monospace throughout, matching the chart font the app ships with: a chart is
+ * written on a character grid in the editor, and equal-width characters keep
+ * the printed page reading like the source it was typed from. The heading and
+ * meta lines use it too, so the sheet is one typeface rather than a chart in
+ * one face under a header in another.
+ */
+const FONT = 'courier';
 
 /* ── Page geometry, in points ───────────────────────────────────────────── */
 
@@ -118,7 +135,7 @@ const newCtx = (doc: jsPDF): Ctx => ({
 type Weight = 'normal' | 'bold' | 'italic' | 'bolditalic';
 
 function style(ctx: Ctx, size: number, weight: Weight, color: string) {
-  ctx.doc.setFont('helvetica', weight);
+  ctx.doc.setFont(FONT, weight);
   ctx.doc.setFontSize(size);
   ctx.doc.setTextColor(color);
 }
@@ -639,7 +656,7 @@ function drawSong(ctx: Ctx, song: PdfSong) {
 
 /* ── Cover and footer ──────────────────────────────────────────────────── */
 
-interface Cover {
+export interface Cover {
   title: string;
   subtitle?: string;
   notes?: string;
@@ -698,7 +715,7 @@ function drawFooters(doc: jsPDF, label: string) {
   const total = doc.getNumberOfPages();
   for (let page = 1; page <= total; page++) {
     doc.setPage(page);
-    doc.setFont('helvetica', 'normal');
+    doc.setFont(FONT, 'normal');
     doc.setFontSize(8);
     doc.setTextColor(MUTED);
     doc.text(safe(label), MARGIN.left, PAGE_H - 22);
@@ -757,4 +774,57 @@ export function downloadSongPdf(song: PdfSong) {
 /** Downloads a setlist as a single PDF, a song per page. */
 export function downloadSetlistPdf(cover: Cover, songs: PdfSong[]) {
   setlistPdf(cover, songs).save(`${slug(cover.title, 'setlist')}.pdf`);
+}
+
+/* ── Printing ──────────────────────────────────────────────────────────── */
+
+/** The frame the last print went through, kept alive until the next one: pull
+ *  it out from under the viewer and the dialog goes with it. */
+let printFrame: HTMLIFrameElement | null = null;
+
+/**
+ * Hands a document to the browser's print dialog.
+ *
+ * The page itself is never printed. What is on screen is a reading view — nav,
+ * transpose controls, whatever width the window happens to be — and printing
+ * it means print output that drifts from the downloaded file every time either
+ * one changes. Printing the PDF instead makes them the same artifact by
+ * construction: one layout, one typeface, one set of page breaks.
+ *
+ * The document loads in an offscreen frame rather than a new tab, which a popup
+ * blocker would stop — the download is built asynchronously, so by the time
+ * there is anything to show, the click that asked for it is long over.
+ */
+function printPdf(doc: jsPDF) {
+  // Opens the dialog as soon as the viewer has the file; contentWindow.print()
+  // below covers the viewers that ignore the open action.
+  doc.autoPrint();
+
+  const frame = document.createElement('iframe');
+  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+  frame.src = doc.output('bloburl').toString();
+  frame.onload = () => {
+    try {
+      frame.contentWindow?.print();
+    } catch {
+      // A viewer that won't be driven from script raises its own dialog.
+    }
+  };
+
+  if (printFrame) {
+    URL.revokeObjectURL(printFrame.src);
+    printFrame.remove();
+  }
+  printFrame = frame;
+  document.body.appendChild(frame);
+}
+
+/** Prints one song — the same document `downloadSongPdf` would have saved. */
+export function printSongPdf(song: PdfSong) {
+  printPdf(songPdf(song));
+}
+
+/** Prints a setlist — the same document `downloadSetlistPdf` would have saved. */
+export function printSetlistPdf(cover: Cover, songs: PdfSong[]) {
+  printPdf(setlistPdf(cover, songs));
 }
