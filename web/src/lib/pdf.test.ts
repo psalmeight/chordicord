@@ -106,13 +106,25 @@ describe('songPdf in two columns', () => {
     expect(new Set(second.map((t) => t.x)).size).toBe(2);
   });
 
-  it('falls back to one column when the lines are too wide to fit two', () => {
-    // A chorded line can't be folded in half without moving chords off their
-    // syllables, so a chart this wide prints full width instead.
-    const wide = numbered(20, 'of a chart with a lyric far too long to fit inside half a page');
+  it('shrinks the body rather than dropping a column', () => {
+    // Lines too wide for half a page at the size that was asked for. The chart
+    // is set smaller so the song still prints in the two columns it's laid out
+    // in — a chorded line can't be folded in half without moving chords off
+    // their syllables, so the size is what gives.
+    const wide = numbered(60, 'of a chart with a lyric far too long to fit inside half a page');
     const doc = songPdf(song({ content: wide, columns: 2 }));
+
+    const drawn = tags(doc, 1);
+    expect(new Set(drawn.map((t) => t.x)).size).toBe(2);
+    // Every line is still one line: shrunk to fit, never wrapped.
+    expect(drawn.map((t) => t.text.trim())).toEqual(Array.from({ length: 60 }, (_, i) => `Z${i}`));
+    expect(doc.getNumberOfPages()).toBe(1);
+  });
+
+  it('gives up the second column only when no readable size fits', () => {
+    const absurd = numbered(4, 'of a chart '.repeat(20));
+    const doc = songPdf(song({ content: absurd, columns: 2 }));
     expect(new Set(tags(doc, 1).map((t) => t.x)).size).toBe(1);
-    expect(doc.getNumberOfPages()).toBe(songPdf(song({ content: wide, columns: 1 })).getNumberOfPages());
   });
 });
 
@@ -132,6 +144,34 @@ describe('setlistPdf', () => {
 
   it('handles an empty setlist', () => {
     expect(setlistPdf(cover, []).getNumberOfPages()).toBe(1);
+  });
+});
+
+describe('footers', () => {
+  const BRAND = 'Family Christian Fellowship - Chords v1.0';
+  /** Everything stamped in the footer band, below the bottom margin. */
+  const feet = (doc: jsPDF, page: number) => placed(doc, page).filter((t) => t.y < 30);
+
+  it('stamps the brand and the page number on every page', () => {
+    const doc = songPdf(song({ content: longContent }));
+    const total = doc.getNumberOfPages();
+    expect(total).toBeGreaterThan(1);
+    for (let page = 1; page <= total; page++) {
+      const texts = feet(doc, page).map((t) => t.text);
+      expect(texts).toContain(BRAND);
+      expect(texts).toContain(`${page} / ${total}`);
+    }
+  });
+
+  it('cuts a long title short of the brand instead of running under it', () => {
+    const doc = songPdf(song({ title: 'A Title Far Too Long To Sit Beside Anything Else At All' }));
+    const brand = feet(doc, 1).find((t) => t.text === BRAND)!;
+    const title = feet(doc, 1).find((t) => t.text.startsWith('A Title'))!;
+
+    expect(title.text.endsWith('...')).toBe(true);
+    // drawFooters leaves the footer's own font set, so this measures the title
+    // in the face it was actually drawn in.
+    expect(title.x + doc.getTextWidth(title.text)).toBeLessThanOrEqual(brand.x);
   });
 });
 

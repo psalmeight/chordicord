@@ -291,10 +291,37 @@ interface Cell {
  *  uses on screen, so a printed chart keeps the shape of the one on it. */
 const HEADING_SCALE: Record<HeadingLevel, number> = { 2: 1.5, 3: 1.25, 4: 1.08 };
 
-/** Gap kept to the right of a chord so neighbouring chords never touch. */
-const CHORD_PAD = 5;
-/** Gap between tokens on a bar-chart row. */
-const TOKEN_GAP = 9;
+/**
+ * A lyric row's own height, and the air kept under it — the same pair
+ * ChordChart uses on screen, so a chart is spaced the same however it's read.
+ *
+ * The gap is what stops a verse setting solid: on a stand the eye needs
+ * somewhere to land when it comes back to the page mid-song.
+ */
+const LINE_HEIGHT = 1.35;
+const LYRIC_GAP = 0.45;
+
+/** A blank line in the source — a breath between blocks, not an empty line of
+ *  singing, so it stands shorter than a lyric row. */
+const BLANK_HEIGHT = 0.9;
+
+/** The chord row above a lyric, against the body size rather than the chord's
+ *  own — ChordChart reserves the same, and the two have to agree or a printed
+ *  verse sits at a different pitch to the one on screen. */
+const CHORD_ROW = 1.3;
+
+/**
+ * Gap kept to the right of a chord so neighbouring chords never touch, and the
+ * gap between tokens on a bar-chart row.
+ *
+ * Both are ems rather than points. A chart shrunk to fit two columns is scaled
+ * whole — padding that stayed a fixed 5pt while the text around it halved
+ * would swallow the space it saved, and would leave the ratio between a
+ * chart's width and its size non-linear, so fitColumns could no longer work
+ * out the size that fits by dividing.
+ */
+const chordPad = (size: number) => size * 0.45;
+const tokenGap = (size: number) => size * 0.8;
 
 /** What a chord slot actually shows. A bracketed bar phrase arrives with its
  *  marks still spelled out — "| D | ^^G^^ |" — and the delimiters are never
@@ -346,7 +373,7 @@ function lyricCells(ctx: Ctx, line: Extract<Line, { type: 'lyrics' }>, size: num
     style(ctx, chordSize, mark.note ? 'bolditalic' : 'bold', BLUE);
     // Measured on what will be drawn, never on the source: a slot carrying
     // "^^G^^" shows one character, not five.
-    const chordWidth = chord ? widthOf(ctx, slotText(chord)) + CHORD_PAD : 0;
+    const chordWidth = chord ? widthOf(ctx, slotText(chord)) + chordPad(chordSize) : 0;
     cells.push({
       chord,
       chordNote: !!mark.note,
@@ -377,8 +404,8 @@ function lyricCells(ctx: Ctx, line: Extract<Line, { type: 'lyrics' }>, size: num
 
 function drawCellRow(ctx: Ctx, row: Cell[], size: number, chordSize: number, showChords: boolean) {
   const hasChord = showChords && row.some((c) => c.chord);
-  const chordH = hasChord ? chordSize * 1.25 : 0;
-  const lyricH = size * 1.3;
+  const chordH = hasChord ? size * CHORD_ROW : 0;
+  const lyricH = size * (LINE_HEIGHT + LYRIC_GAP);
 
   ensure(ctx, chordH + lyricH);
 
@@ -407,7 +434,7 @@ function drawCellRow(ctx: Ctx, row: Cell[], size: number, chordSize: number, sho
 function drawLyricLine(ctx: Ctx, line: Extract<Line, { type: 'lyrics' }>, size: number, chordSize: number, showChords: boolean) {
   const cells = lyricCells(ctx, line, size, chordSize);
   if (!cells.length) {
-    ctx.y += size * 1.3;
+    ctx.y += size * (LINE_HEIGHT + LYRIC_GAP);
     return;
   }
 
@@ -447,7 +474,7 @@ function drawChordLine(ctx: Ctx, line: Extract<Line, { type: 'chords' }>, chordS
     }
     if (token.note) ctx.doc.text(safe(token.text), x, baseline(ctx.y, chordSize));
     else drawSlot(ctx, token.text, x, baseline(ctx.y, chordSize), ink, ink === RED ? ink : BLUE_FAINT);
-    x += w + TOKEN_GAP;
+    x += w + tokenGap(chordSize);
   }
   ctx.y += lineH;
 }
@@ -479,31 +506,32 @@ function naturalWidth(ctx: Ctx, song: ParsedSong, size: number, chordSize: numbe
       widest = Math.max(widest, lyricCells(ctx, line, size, chordSize).reduce((w, c) => w + c.width, 0));
     } else if (line.type === 'chords' && showChords) {
       style(ctx, chordSize, 'bold', BLUE);
-      const w = line.chords.reduce((sum, t) => sum + widthOf(ctx, slotText(t.text)) + TOKEN_GAP, 0);
-      widest = Math.max(widest, w - TOKEN_GAP);
+      const gap = tokenGap(chordSize);
+      const w = line.chords.reduce((sum, t) => sum + widthOf(ctx, slotText(t.text)) + gap, 0);
+      widest = Math.max(widest, w - gap);
     }
   }
   return widest;
 }
 
 /**
- * The smallest the chart body may be shrunk to make two columns fit.
+ * The smallest a chart body may be set at, in points.
  *
- * Some shrinking is the point — two columns exist to get more of a song onto
- * one sheet. Past this it stops being readable at a music stand, and a single
- * full-width column at the size that was asked for is the better print.
+ * Two columns are the song's own setting, so the body shrinks by as much as it
+ * takes to honour them — a chart that reads two-up on screen has to print
+ * two-up as well. Only when even this size won't fit does the layout change,
+ * because a chart set smaller than this can't be read from a music stand and a
+ * single readable column beats two unreadable ones.
  */
-const MIN_COLUMN_SCALE = 0.8;
+const MIN_CHART_SIZE = 6;
 
 /**
  * The column count and body size to print this chart at.
  *
- * A chart's lines are never re-wrapped by choice — a chord sits over its own
- * syllable, and folding a line in half moves it. So two columns are only
- * honoured when the longest line fits one, shrinking the body a little if
- * that's all it takes and falling back to a single column when it isn't. This
- * is the print equivalent of ChordChart dropping to one column on a narrow
- * screen.
+ * A chart's lines are never re-wrapped to make them fit — a chord sits over its
+ * own syllable, and folding a line in half moves it — so the body size is what
+ * gives instead. Text scales linearly, so the ratio of the column to the
+ * longest unbreakable line is exactly the scale that makes it fit.
  */
 function fitColumns(ctx: Ctx, song: ParsedSong, size: number, showChords: boolean): { cols: number; size: number } {
   const wanted = 2;
@@ -512,8 +540,9 @@ function fitColumns(ctx: Ctx, song: ParsedSong, size: number, showChords: boolea
 
   const scale = columnWidth(wanted) / natural;
   if (scale >= 1) return { cols: wanted, size };
-  if (scale >= MIN_COLUMN_SCALE) return { cols: wanted, size: size * scale };
-  return { cols: 1, size };
+
+  const shrunk = size * scale;
+  return shrunk >= MIN_CHART_SIZE ? { cols: wanted, size: shrunk } : { cols: 1, size };
 }
 
 function drawChart(ctx: Ctx, song: PdfSong) {
@@ -534,7 +563,7 @@ function drawChart(ctx: Ctx, song: PdfSong) {
   parsed.lines.forEach((line, i) => {
     switch (line.type) {
       case 'blank':
-        ctx.y += size * 0.7;
+        ctx.y += size * BLANK_HEIGHT;
         break;
       case 'section': {
         drawSection(ctx, line.name, size, i === 0);
@@ -710,16 +739,45 @@ function drawCover(ctx: Ctx, cover: Cover, songs: PdfSong[]) {
   });
 }
 
-/** Stamps "label — n / total" along the foot of every page. */
+/** Stamped down the middle of every footer, so a sheet that gets separated
+ *  from the rest still says where it came from. The version is written here by
+ *  hand: it names the chart format someone is reading off the stand, which
+ *  isn't the web app's own release number. */
+const BRAND = 'Family Christian Fellowship - Chords v1.0';
+
+/** Footer text size. A footer is for finding a sheet again in a pile of paper
+ *  — set any larger it starts competing with the chart above it. */
+const FOOTER_SIZE = 6.5;
+
+const FOOTER_Y = PAGE_H - 22;
+
+/** Gap kept either side of the brand, so nothing reads as one run of text. */
+const FOOTER_GAP = 12;
+
+/** `text` cut down to `width` with an ellipsis, or left alone if it fits. */
+function clip(doc: jsPDF, text: string, width: number): string {
+  if (width <= 0) return '';
+  if (doc.getTextWidth(text) <= width) return text;
+  let out = text;
+  while (out && doc.getTextWidth(`${out}...`) > width) out = out.slice(0, -1);
+  return out ? `${out}...` : '';
+}
+
+/** Stamps the title, the brand and "n / total" along the foot of every page. */
 function drawFooters(doc: jsPDF, label: string) {
   const total = doc.getNumberOfPages();
   for (let page = 1; page <= total; page++) {
     doc.setPage(page);
     doc.setFont(FONT, 'normal');
-    doc.setFontSize(8);
+    doc.setFontSize(FOOTER_SIZE);
     doc.setTextColor(MUTED);
-    doc.text(safe(label), MARGIN.left, PAGE_H - 22);
-    doc.text(`${page} / ${total}`, PAGE_W - MARGIN.right, PAGE_H - 22, { align: 'right' });
+
+    doc.text(safe(BRAND), PAGE_W / 2, FOOTER_Y, { align: 'center' });
+    doc.text(`${page} / ${total}`, PAGE_W - MARGIN.right, FOOTER_Y, { align: 'right' });
+    // The title is the one part of a footer that can be any length, so it is
+    // what gives way — cut at the brand rather than running underneath it.
+    const room = PAGE_W / 2 - doc.getTextWidth(BRAND) / 2 - FOOTER_GAP - MARGIN.left;
+    doc.text(safe(clip(doc, label, room)), MARGIN.left, FOOTER_Y);
   }
 }
 

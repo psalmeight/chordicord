@@ -74,6 +74,19 @@ function SlotText({ text }: { text: string }) {
  *  height a line of text would have taken. */
 const LINE_HEIGHT = 1.35;
 
+/** Air under every lyric row, on top of its line height.
+ *
+ *  Lyrics set solid are hard to hold your place in on a stand — the eye needs
+ *  a gap to come back to after looking up. In ems, so it opens up with the
+ *  font-size control rather than staying a fixed few pixels. lib/pdf.ts adds
+ *  the same, measured against the same line height, so the printed chart is
+ *  spaced like the one on screen. */
+const LYRIC_GAP = 0.45;
+
+/** A blank line in the source. Shorter than a lyric row: it is a breath
+ *  between blocks, not an empty line of singing. */
+const BLANK_HEIGHT = 0.9;
+
 /** Space between the two columns when the chart splits. */
 const COLUMN_GAP = '2.5rem';
 
@@ -207,7 +220,7 @@ export default function ChordChart({
 function ChartLine({ line, showChords }: { line: Line; showChords: boolean }) {
   switch (line.type) {
     case 'blank':
-      return <Box height="0.9em" />;
+      return <Box height={`${BLANK_HEIGHT}em`} />;
 
     case 'section':
       return (
@@ -251,11 +264,12 @@ function ChartLine({ line, showChords }: { line: Line; showChords: boolean }) {
       // A line with no chords at all gets no chord row: reserving the empty
       // slot anyway pushes chord-less lyrics a full line away from whatever
       // sits above them (a bar chart, a section header). The PDF renderer
-      // makes the same call in drawCellRow. Every lyric line still keeps a
-      // small bottom margin so the next chord row never sits flush under it.
+      // makes the same call in drawCellRow. The gap below is kept whether or
+      // not chords are showing — it is there to separate one line of singing
+      // from the next, and a lyrics-only chart needs it just as much.
       const anyChord = line.pairs.some((p) => p.chord);
       return (
-        <Box whiteSpace="pre-wrap" mb={showChords ? 1.5 : 0}>
+        <Box whiteSpace="pre-wrap" mb={`${LYRIC_GAP}em`}>
           {line.pairs.map((pair, i) => (
             <Box key={i} display="inline-block" verticalAlign="bottom" whiteSpace="pre">
               {showChords && anyChord && (
