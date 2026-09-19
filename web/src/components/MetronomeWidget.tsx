@@ -1,11 +1,16 @@
 import { Box, Button, Flex, HStack, Stack, Text } from '@chakra-ui/react';
 import { Gauge, Minus, Pause, Play, Plus, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Select } from '@/components/FormControls';
 import StepButton from '@/components/StepButton';
 import { MAX_BPM, MIN_BPM, useMetronome } from '@/contexts/MetronomeContext';
 
 const BEAT_OPTIONS = [1, 2, 3, 4, 5, 6, 7];
+
+/** The pages that show a chart: /songs/:id and /setlists/:id, and not their
+ *  editors (/songs/new, /songs/:id/edit, /setlists/:id/items/:itemId/edit). */
+const CHART_PAGES = [/^\/songs\/(?!new$)[^/]+$/, /^\/setlists\/[^/]+$/];
 // A run of taps more than two seconds apart is a new count-in, not the same one.
 const TAP_RESET_MS = 2000;
 
@@ -44,9 +49,13 @@ export default function MetronomeWidget() {
     }
   };
 
-  // Off screen while a song is being edited — the editor's action bar owns
-  // the bottom edge there, and a metronome isn't what you reach for mid-edit.
-  if (editing) return null;
+  // Only where there's a chart to play along to: a song's page, or a setlist.
+  // Everywhere else — the lists, the archive, the team page, the editors — it
+  // is one more thing floating over the content for no reason. (The editing
+  // check still matters: the songbank modal opens over a setlist.)
+  const { pathname } = useLocation();
+  const onChart = CHART_PAGES.some((re) => re.test(pathname));
+  if (!onChart || editing) return null;
 
   return (
     <Box position="fixed" bottom="20px" right="20px" zIndex={1400} className="no-print">

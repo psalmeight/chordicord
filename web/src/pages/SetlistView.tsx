@@ -3,11 +3,10 @@ import {
   Textarea,
 } from '@chakra-ui/react';
 import {
-  Archive, ArrowLeft, ChevronDown, ChevronUp, Columns2, EyeOff, FileDown, Library, Music2, Pencil,
-  Plus, Printer, RefreshCw, SlidersHorizontal, StickyNote, X,
+  Archive, ArrowLeft, ChevronDown, ChevronUp, Columns2, Eye, EyeOff, FileDown, Library, Music2,
+  Pencil, Plus, Printer, RefreshCw, StickyNote, X,
 } from 'lucide-react';
-import { forwardRef, useEffect, useState } from 'react';
-import type { ComponentProps, ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import api, { apiError } from '@/lib/api';
@@ -26,12 +25,14 @@ import ChartV2 from '@/components/ChartV2';
 import ChordChart from '@/components/ChordChart';
 import { CAPO_OPTIONS, Select } from '@/components/FormControls';
 import { NoteCardList } from '@/components/NoteCardView';
+import { OptionButton, OptionDivider, OptionsMenu, OptionRow } from '@/components/OptionsMenu';
 import SongForm from '@/components/SongForm';
+import SyncConfirmDialog from '@/components/SyncConfirmDialog';
 import type { Setlist, SetlistItem, Song } from '@/types';
 
 /** A setlist row as the PDF renderer wants it — printed in the service key,
  *  not the key the chart was written in. */
-const toPdfSong = (item: SetlistItem): PdfSong => ({
+const toPdfSong = (item: SetlistItem, showChords: boolean): PdfSong => ({
   title: item.title,
   artist: item.artist,
   fromKey: item.key ?? '',
@@ -42,48 +43,7 @@ const toPdfSong = (item: SetlistItem): PdfSong => ({
   content: item.content,
   noteCards: item.noteCards,
   columns: item.chartColumns,
-});
-
-/** A labelled control row inside the per-song options popover. */
-function OptionRow({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <Box>
-      <Flex justify="space-between" align="baseline" mb={1}>
-        <Text fontSize="xs" fontWeight="medium" color="gray.600">
-          {label}
-        </Text>
-        {hint && (
-          <Text fontSize="xs" color="gray.400">
-            {hint}
-          </Text>
-        )}
-      </Flex>
-      {children}
-    </Box>
-  );
-}
-
-/** One action in the popover: an icon with its name written out, left-aligned
- *  so the list scans like a menu. forwardRef so Popover.CloseTrigger can wrap it. */
-const OptionButton = forwardRef<
-  HTMLButtonElement,
-  { icon: ReactNode; danger?: boolean } & ComponentProps<typeof Button>
->(function OptionButton({ icon, danger, children, ...rest }, ref) {
-  return (
-    <Button
-      ref={ref}
-      size="sm"
-      variant="ghost"
-      w="100%"
-      justifyContent="flex-start"
-      colorPalette={danger ? 'red' : 'gray'}
-      color={danger ? 'red.600' : undefined}
-      {...rest}
-    >
-      {icon}
-      <Text ml={2}>{children}</Text>
-    </Button>
-  );
+  showChords,
 });
 
 export default function SetlistView() {
@@ -111,9 +71,15 @@ export default function SetlistView() {
   const [fontSize] = useChartFontSize();
   // The v2 chart, app-wide from the header — see ChartV2.
   const [v2] = useEditorV2();
+  // Lyrics only, for the whole setlist — singers' view. Local to this screen
+  // and never saved; the PDF and print follow it so what prints is what's seen.
+  const [showChords, setShowChords] = useState(true);
   // The setlist item whose songbank song is open in the edit modal — a
   // leader fixes the chart at its source without leaving the service.
   const [songbankEdit, setSongbankEdit] = useState<SetlistItem | null>(null);
+  // The item a resync is being confirmed for, and whether the prompt follows
+  // a songbank edit made from this page (which only changes the framing).
+  const [syncPrompt, setSyncPrompt] = useState<{ item: SetlistItem; afterSave: boolean } | null>(null);
 
   const load = () =>
     api
@@ -210,32 +176,22 @@ export default function SetlistView() {
     }
   };
 
-  const resync = async (item: SetlistItem) => {
-    if (
-      !window.confirm(
-        `Update "${item.title}" from the songbank? This replaces this setlist's edits to the ` +
-          `chart, notes and key with the songbank version. Capo settings and the track tune are kept.`,
-      )
-    )
-      return;
-    await resyncNow(item);
-  };
+  // The Sync button: the warning first (SyncConfirmDialog), then resyncNow.
+  const resync = (item: SetlistItem) => setSyncPrompt({ item, afterSave: false });
 
   // After a songbank edit made from this page, the obvious next step is to
   // pull it into the setlist — but it's offered, not assumed, because the
   // copy may carry deliberate per-service edits the resync would erase.
-  const songbankSaved = async () => {
+  const songbankSaved = () => {
     const item = songbankEdit;
     setSongbankEdit(null);
-    if (!item) return;
-    if (
-      window.confirm(
-        `Saved to the songbank. Update this setlist's copy of "${item.title}" from it now? ` +
-          `That replaces this setlist's edits to the chart, notes and key. Capo settings and the track tune are kept.`,
-      )
-    ) {
-      await resyncNow(item);
-    }
+    if (item) setSyncPrompt({ item, afterSave: true });
+  };
+
+  const confirmSync = async () => {
+    const prompt = syncPrompt;
+    setSyncPrompt(null);
+    if (prompt) await resyncNow(prompt.item);
   };
 
   const move = async (index: number, delta: number) => {
@@ -270,7 +226,7 @@ export default function SetlistView() {
     setPdfBusy(true);
     try {
       const pdf = await import('@/lib/pdf');
-      const songs = items.map(toPdfSong);
+      const songs = items.map((item) => toPdfSong(item, showChords));
       if (action === 'save') pdf.downloadSetlistPdf(cover(), songs);
       else pdf.printSetlistPdf(cover(), songs);
     } catch (err) {
@@ -285,7 +241,7 @@ export default function SetlistView() {
   // whole-setlist PDF above stays capo-free: it's the shared team artifact.
   const downloadItemPdf = async (item: SetlistItem) => {
     const { downloadSongPdf } = await import('@/lib/pdf');
-    const base = toPdfSong(item);
+    const base = toPdfSong(item, showChords);
     if (item.myCapo > 0 && base.toKey) {
       downloadSongPdf({
         ...base,
@@ -374,6 +330,17 @@ export default function SetlistView() {
           </Button>
         </Link>
         <HStack gap={2} wrap="wrap">
+          {items.length > 0 && (
+            <Button
+              size="sm"
+              variant={showChords ? 'outline' : 'subtle'}
+              onClick={() => setShowChords((v) => !v)}
+              title={showChords ? 'Show the lyrics alone, for every song' : 'Show the chords again'}
+            >
+              {showChords ? <EyeOff size={16} /> : <Eye size={16} />}
+              <Text ml={1}>{showChords ? 'Hide chords' : 'Show chords'}</Text>
+            </Button>
+          )}
           <Button
             size="sm"
             variant="outline"
@@ -610,101 +577,92 @@ export default function SetlistView() {
                         </Portal>
                       </Popover.Root>
                     )}
+                    {/* Saved to this setlist's copy. Only where there's a
+                        chart to lay out. */}
+                    {editable && (v2 ? item.contentV2 || item.content : item.content).trim() && (
+                      <Button
+                        size="xs"
+                        variant={item.chartColumns === 2 ? 'subtle' : 'outline'}
+                        colorPalette={item.chartColumns === 2 ? 'brand' : 'gray'}
+                        onClick={() => setColumns(item, item.chartColumns === 2 ? 1 : 2)}
+                        title={
+                          item.chartColumns === 2
+                            ? 'Two columns — click for one. Narrow screens show one either way.'
+                            : 'One column — click to split the chart into two side by side.'
+                        }
+                      >
+                        <Columns2 size={14} />
+                        <Text ml={1}>{item.chartColumns === 2 ? '2 columns' : '1 column'}</Text>
+                      </Button>
+                    )}
                     {/* Everything else that used to be a row of icon buttons,
                         behind one labelled button — a song shows its chart, not
                         a toolbar. Selects and Move keep the popover open; the
                         one-shot actions close it. */}
-                    <Popover.Root lazyMount unmountOnExit positioning={{ placement: 'bottom-end' }}>
-                      <Popover.Trigger asChild>
-                        <Button size="xs" variant="outline">
-                          <SlidersHorizontal size={14} />
-                          <Text ml={1}>Options</Text>
-                        </Button>
-                      </Popover.Trigger>
-                      <Portal>
-                        <Popover.Positioner>
-                          <Popover.Content w="270px">
-                            <Popover.Arrow />
-                            <Popover.Body p={3}>
-                              <Stack gap={1}>
-                                {item.key ? (
-                                  <>
-                                    <OptionRow label="Key">
-                                      <Select
-                                        value={displayKey}
-                                        onChange={(v) => setKey(item, v)}
-                                        options={keyOptions(item.key).map((opt) => ({ value: opt.key, label: opt.label }))}
-                                        disabled={!editable}
-                                        size="sm"
-                                        triggerProps={{ fontWeight: 'semibold' }}
-                                      />
-                                    </OptionRow>
-                                    {/* Capo is per-account, so every role gets the control. */}
-                                    <OptionRow label="Capo" hint="Only you see this">
-                                      <Select
-                                        value={String(item.myCapo)}
-                                        onChange={(v) => saveCapo(item, Number(v))}
-                                        options={CAPO_OPTIONS.map((o) => ({
-                                          value: o.value,
-                                          label: o.value === '0' ? 'No capo' : `Capo ${o.value}`,
-                                        }))}
-                                        size="sm"
-                                      />
-                                    </OptionRow>
-                                    <Box borderTopWidth="1px" my={1} />
-                                  </>
-                                ) : null}
+                    <OptionsMenu>
+                      {item.key ? (
+                        <>
+                          <OptionRow label="Key">
+                            <Select
+                              value={displayKey}
+                              onChange={(v) => setKey(item, v)}
+                              options={keyOptions(item.key).map((opt) => ({ value: opt.key, label: opt.label }))}
+                              disabled={!editable}
+                              size="sm"
+                              triggerProps={{ fontWeight: 'semibold' }}
+                            />
+                          </OptionRow>
+                          {/* Capo is per-account, so every role gets the control. */}
+                          <OptionRow label="Capo" hint="Only you see this">
+                            <Select
+                              value={String(item.myCapo)}
+                              onChange={(v) => saveCapo(item, Number(v))}
+                              options={CAPO_OPTIONS.map((o) => ({
+                                value: o.value,
+                                label: o.value === '0' ? 'No capo' : `Capo ${o.value}`,
+                              }))}
+                              size="sm"
+                            />
+                          </OptionRow>
+                          <OptionDivider />
+                        </>
+                      ) : null}
 
-                                <Popover.CloseTrigger asChild>
-                                  <OptionButton icon={<FileDown size={16} />} onClick={() => downloadItemPdf(item)}>
-                                    Download PDF
-                                  </OptionButton>
-                                </Popover.CloseTrigger>
-                                <Popover.CloseTrigger asChild>
-                                  <OptionButton icon={<StickyNote size={16} />} onClick={() => toggleMyNotes(item)}>
-                                    {openNotes[item.id] ? 'Hide private note' : 'Private note'}
-                                  </OptionButton>
-                                </Popover.CloseTrigger>
+                      <Popover.CloseTrigger asChild>
+                        <OptionButton icon={<FileDown size={16} />} onClick={() => downloadItemPdf(item)}>
+                          Download PDF
+                        </OptionButton>
+                      </Popover.CloseTrigger>
+                      <Popover.CloseTrigger asChild>
+                        <OptionButton icon={<StickyNote size={16} />} onClick={() => toggleMyNotes(item)}>
+                          {openNotes[item.id] ? 'Hide private note' : 'Private note'}
+                        </OptionButton>
+                      </Popover.CloseTrigger>
 
-                                {editable && (
-                                  <>
-                                    <Box borderTopWidth="1px" my={1} />
-                                    {/* Only worth offering where there's a chart to lay out —
-                                        and the v2 chart has no columns to lay out. */}
-                                    {!v2 && item.content.trim() && (
-                                      <OptionButton
-                                        icon={<Columns2 size={16} />}
-                                        onClick={() => setColumns(item, item.chartColumns === 2 ? 1 : 2)}
-                                      >
-                                        {item.chartColumns === 2 ? 'Back to one column' : 'Split into two columns'}
-                                      </OptionButton>
-                                    )}
-                                    <OptionButton
-                                      icon={<ChevronUp size={16} />}
-                                      onClick={() => move(index, -1)}
-                                      disabled={index === 0}
-                                    >
-                                      Move up
-                                    </OptionButton>
-                                    <OptionButton
-                                      icon={<ChevronDown size={16} />}
-                                      onClick={() => move(index, 1)}
-                                      disabled={index === items.length - 1}
-                                    >
-                                      Move down
-                                    </OptionButton>
-                                    <Box borderTopWidth="1px" my={1} />
-                                    <OptionButton icon={<X size={16} />} onClick={() => remove(item.id)} danger>
-                                      Remove from setlist
-                                    </OptionButton>
-                                  </>
-                                )}
-                              </Stack>
-                            </Popover.Body>
-                          </Popover.Content>
-                        </Popover.Positioner>
-                      </Portal>
-                    </Popover.Root>
+                      {editable && (
+                        <>
+                          <OptionDivider />
+                          <OptionButton
+                            icon={<ChevronUp size={16} />}
+                            onClick={() => move(index, -1)}
+                            disabled={index === 0}
+                          >
+                            Move up
+                          </OptionButton>
+                          <OptionButton
+                            icon={<ChevronDown size={16} />}
+                            onClick={() => move(index, 1)}
+                            disabled={index === items.length - 1}
+                          >
+                            Move down
+                          </OptionButton>
+                          <OptionDivider />
+                          <OptionButton icon={<X size={16} />} onClick={() => remove(item.id)} danger>
+                            Remove from setlist
+                          </OptionButton>
+                        </>
+                      )}
+                    </OptionsMenu>
                   </HStack>
                 </Flex>
 
@@ -804,6 +762,8 @@ export default function SetlistView() {
                       fromKey={item.key ?? ''}
                       toKey={chartKey}
                       fontSize={fontSize}
+                      showChords={showChords}
+                      columns={item.chartColumns}
                     />
                   </Box>
                 ) : (
@@ -816,6 +776,7 @@ export default function SetlistView() {
                           fromKey={item.key ?? ''}
                           toKey={chartKey}
                           fontSize={fontSize}
+                          showChords={showChords}
                           sectionNotes={notes.bySection}
                           columns={item.chartColumns}
                         />
@@ -882,6 +843,13 @@ export default function SetlistView() {
           </Dialog.Positioner>
         </Portal>
       </Dialog.Root>
+
+      <SyncConfirmDialog
+        title={syncPrompt?.item.title ?? null}
+        afterSave={syncPrompt?.afterSave}
+        onConfirm={confirmSync}
+        onClose={() => setSyncPrompt(null)}
+      />
 
       {items.length > 0 && <AutoScrollWidget />}
     </Stack>

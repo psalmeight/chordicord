@@ -1,7 +1,5 @@
-import {
-  Box, Button, Flex, HStack, Heading, Input, Popover, Portal, Spinner, Stack, Text,
-} from '@chakra-ui/react';
-import { Archive, ChevronDown } from 'lucide-react';
+import { Box, Button, Flex, Heading, Input, Spinner, Stack, Text } from '@chakra-ui/react';
+import { Archive } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import api, { apiError } from '@/lib/api';
@@ -16,6 +14,7 @@ import AudioPlayer from '@/components/AudioPlayer';
 import AudioUpload from '@/components/AudioUpload';
 import ChartEditorPanels, { KeyConvertBanner } from '@/components/ChartEditorPanels';
 import { ChartV2Editor } from '@/components/ChartV2';
+import { EditorActionBar, MoreDetails } from '@/components/EditorChrome';
 import { useChartFontSize } from '@/lib/useChartFontSize';
 import { useEditorV2 } from '@/lib/useEditorV2';
 import { toV2Draft } from '@/lib/v2draft';
@@ -267,70 +266,50 @@ export default function SongForm({ songId, leading, heading, onSaved, onArchived
                 <Select value={form.timeSignature} onChange={set('timeSignature')} options={TIME_SIGNATURES} />
               </Field>
             </Box>
-            {/* Everything else about the song lives behind one button, so
-                the chart — the reason anyone opens this — starts higher. */}
-            <Popover.Root lazyMount unmountOnExit positioning={{ placement: 'bottom-start' }}>
-              <Popover.Trigger asChild>
-                {/* md, to stand the same height as the selects beside it. */}
-                <Button size="md" variant="outline" flexShrink={0} bg="white">
-                  <Text>More details</Text>
-                  <Box ml={1}>
-                    <ChevronDown size={14} />
+            <MoreDetails>
+              <Stack gap={3}>
+                <Flex gap={3} wrap="wrap">
+                  <Box flex="1 1 100px">
+                    <Field label="Tempo (bpm)">
+                      <Input
+                        type="number"
+                        value={form.tempo}
+                        onChange={(e) => set('tempo')(e.target.value)}
+                        placeholder="72"
+                      />
+                    </Field>
                   </Box>
-                </Button>
-              </Popover.Trigger>
-              <Portal>
-                <Popover.Positioner>
-                  <Popover.Content w={{ base: 'min(360px, calc(100vw - 32px))', sm: '420px' }} maxH="70vh" overflowY="auto">
-                    <Popover.Arrow />
-                    <Popover.Body p={4}>
-                      <Stack gap={3}>
-                        <Flex gap={3} wrap="wrap">
-                          <Box flex="1 1 100px">
-                            <Field label="Tempo (bpm)">
-                              <Input
-                                type="number"
-                                value={form.tempo}
-                                onChange={(e) => set('tempo')(e.target.value)}
-                                placeholder="72"
-                              />
-                            </Field>
-                          </Box>
-                          <Box flex="1 1 120px">
-                            <Field label="Feel">
-                              <Select value={form.feel} onChange={set('feel')} options={['', ...FEELS]} />
-                            </Field>
-                          </Box>
-                          <Box flex="1 1 100px">
-                            <Field label="CCLI">
-                              <Input value={form.ccli} onChange={(e) => set('ccli')(e.target.value)} placeholder="1234567" />
-                            </Field>
-                          </Box>
-                        </Flex>
-                        <Field label="Chart layout">
-                          <Select
-                            value={form.chartColumns}
-                            onChange={set('chartColumns')}
-                            options={CHART_LAYOUTS}
-                            title="Two columns split the chart side by side on wide screens; narrow screens always fall back to one"
-                          />
-                        </Field>
-                        <Field label="Tags (comma separated)">
-                          <Input
-                            value={form.tags}
-                            onChange={(e) => set('tags')(e.target.value)}
-                            placeholder="worship, christmas, fast"
-                          />
-                        </Field>
-                        <Field label="Notes">
-                          <NoteCardsEditor cards={noteCards} content={form.content} onChange={setNoteCards} />
-                        </Field>
-                      </Stack>
-                    </Popover.Body>
-                  </Popover.Content>
-                </Popover.Positioner>
-              </Portal>
-            </Popover.Root>
+                  <Box flex="1 1 120px">
+                    <Field label="Feel">
+                      <Select value={form.feel} onChange={set('feel')} options={['', ...FEELS]} />
+                    </Field>
+                  </Box>
+                  <Box flex="1 1 100px">
+                    <Field label="CCLI">
+                      <Input value={form.ccli} onChange={(e) => set('ccli')(e.target.value)} placeholder="1234567" />
+                    </Field>
+                  </Box>
+                </Flex>
+                <Field label="Chart layout">
+                  <Select
+                    value={form.chartColumns}
+                    onChange={set('chartColumns')}
+                    options={CHART_LAYOUTS}
+                    title="Two columns split the chart side by side on wide screens; narrow screens always fall back to one"
+                  />
+                </Field>
+                <Field label="Tags (comma separated)">
+                  <Input
+                    value={form.tags}
+                    onChange={(e) => set('tags')(e.target.value)}
+                    placeholder="worship, christmas, fast"
+                  />
+                </Field>
+                <Field label="Notes">
+                  <NoteCardsEditor cards={noteCards} content={form.content} onChange={setNoteCards} />
+                </Field>
+              </Stack>
+            </MoreDetails>
           </Flex>
 
           <KeyConvertBanner convert={convert} targetKey={form.key} />
@@ -382,50 +361,17 @@ export default function SongForm({ songId, leading, heading, onSaved, onArchived
         />
       )}
 
-      {/* The action bar floats at the foot of whatever scrolls — the page, or
-          the modal's body — so Save is never a page-length away from the
-          chart being typed. Sticky rather than fixed: it stays inside its
-          host, and comes to rest in the flow once the end is reached. The
-          same white card as every other section, with a shadow so it reads
-          as sitting over the content while it floats.
-
-          The floating widgets keep out of its way: the metronome hides while
-          an editor is up and the guide button moves above the bar. */}
-      <Box
-        position="sticky"
-        // Two gaps: `bottom` only applies while the bar is stuck, so it's the
-        // extra lift when floating; `mb` (which sticky also honours) is the
-        // gap at rest, once the content's end has scrolled into view. The
-        // modal's body pads its own edge, so there the two are the same 12px.
-        bottom={inModal ? 0 : 4}
-        mb={inModal ? 3 : 6}
-        zIndex="docked"
-        // A pale brand wash and a heavier shadow than the other cards: this
-        // one sits over the content, and it's where Save lives.
-        bg="brand.50"
-        borderRadius="lg"
-        borderWidth="1px"
-        borderColor="brand.200"
-        boxShadow="0 10px 30px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08)"
-        px={4}
-        py={3}
-        className="no-print"
-      >
-        <Flex justify="space-between" align="center" gap={3}>
-          <Box>{leading}</Box>
-          <HStack gap={2}>
-            {!isNew && onArchived && (
-              <Button size="sm" variant="outline" bg="white" onClick={archive} title="Archive this song">
-                <Archive size={16} />
-                <Text ml={1}>Archive</Text>
-              </Button>
-            )}
-            <Button size="sm" colorPalette="brand" onClick={save} loading={saving}>
-              Save
-            </Button>
-          </HStack>
-        </Flex>
-      </Box>
+      <EditorActionBar leading={leading} inModal={inModal}>
+        {!isNew && onArchived && (
+          <Button size="sm" variant="outline" bg="white" onClick={archive} title="Archive this song">
+            <Archive size={16} />
+            <Text ml={1}>Archive</Text>
+          </Button>
+        )}
+        <Button size="sm" colorPalette="brand" onClick={save} loading={saving}>
+          Save
+        </Button>
+      </EditorActionBar>
     </Stack>
   );
 }

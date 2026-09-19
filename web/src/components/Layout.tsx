@@ -94,9 +94,8 @@ export default function Layout({ children }: { children: ReactNode }) {
         {children}
       </Container>
 
-      {/* Mounted app-wide, beside the metronome: the format is worth looking up
-          while reading a chart someone else wrote, not only while writing one.
-          Describes whichever format this device is using. */}
+      {/* The chart-writing guide, for whichever format this device is using.
+          Mounted app-wide but shows itself only while a song is being edited. */}
       {v2 ? <ChartV2Guide /> : <ChartSyntaxGuide />}
       <Toaster />
     </Box>

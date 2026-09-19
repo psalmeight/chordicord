@@ -68,22 +68,16 @@ export default function ChartSyntaxGuide() {
   const [open, setOpen] = useState(false);
   const { editing } = useMetronome();
 
-  // Parked beside the metronome's button, which owns the bottom-right corner
-  // and is always a 52px circle: 20px gutter + 52px + an 8px gap. A step
-  // above it in the stack: the metronome's panel opens upward across this
-  // spot, and the guide must win when both are open.
-  //
-  // While a song is being edited the metronome is gone and the editor's
-  // action bar takes the bottom edge, so this slides into the corner and up
-  // one bar-height — still a thumb away from the chart being typed.
+  // Only while a song is being edited: the format is a question for whoever
+  // is writing a chart, and on every other page the button is one more thing
+  // floating over a chart someone is trying to read. The metronome is gone
+  // while editing and the editor's action bar takes the bottom edge, so this
+  // sits in the corner one bar-height up — a thumb away from the chart being
+  // typed, and above the metronome's slot in the stack in case both show.
+  if (!editing) return null;
+
   return (
-    <Box
-      position="fixed"
-      bottom={editing ? '84px' : '20px'}
-      right={editing ? '20px' : '80px'}
-      zIndex={1401}
-      className="no-print"
-    >
+    <Box position="fixed" bottom="84px" right="20px" zIndex={1401} className="no-print">
       {open && (
         <Box
           w={{ base: 'min(320px, calc(100vw - 40px))', sm: '420px' }}

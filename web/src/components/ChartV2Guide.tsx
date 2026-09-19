@@ -71,16 +71,12 @@ export default function ChartV2Guide() {
   const [open, setOpen] = useState(false);
   const { editing } = useMetronome();
 
-  // Positioned exactly as ChartSyntaxGuide is: beside the metronome, and up
-  // into the corner while a song editor holds the bottom edge.
+  // Shown and placed exactly as ChartSyntaxGuide is: only while a song is
+  // being edited, in the corner above the editor's action bar.
+  if (!editing) return null;
+
   return (
-    <Box
-      position="fixed"
-      bottom={editing ? '84px' : '20px'}
-      right={editing ? '20px' : '80px'}
-      zIndex={1401}
-      className="no-print"
-    >
+    <Box position="fixed" bottom="84px" right="20px" zIndex={1401} className="no-print">
       {open && (
         <Box
           w={{ base: 'min(320px, calc(100vw - 40px))', sm: '440px' }}

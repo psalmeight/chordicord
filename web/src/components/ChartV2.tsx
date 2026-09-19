@@ -1,5 +1,5 @@
 import { Box, Text } from '@chakra-ui/react';
-import { Fragment, useEffect, useMemo, useRef } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { transposeContent } from '@/lib/chordpro';
 import { parseChord } from '@/lib/chords';
@@ -33,6 +33,10 @@ interface Props {
   /** The key to display in. Equal to fromKey, or either blank, means as written. */
   toKey: string;
   fontSize: number;
+  /** False shows the lyrics alone — chord rows and bracketed chords dropped. */
+  showChords?: boolean;
+  /** 1 or 2; see ChartV2Text. */
+  columns?: number;
 }
 
 /** Chart line height. Roomier than the classic chart's 1.35: with chords on
@@ -111,7 +115,9 @@ function renderChordRow(text: string): ReactNode {
  * plain text, unless the line's plain words are all chords (bars and repeat
  * counts allowed), in which case it's a chord row and each chord is coloured.
  */
-function renderLine(line: string): ReactNode {
+/** A line split into its marks and the plain text between them, with the
+ *  verdict on whether the plain words make it a chord row. */
+function analyse(line: string) {
   const segments: { mark: boolean; text: string }[] = [];
   let last = 0;
   for (const m of line.matchAll(MARK_RE)) {
@@ -126,6 +132,35 @@ function renderLine(line: string): ReactNode {
     .flatMap((seg) => seg.text.split(/\s+|\|/))
     .filter((w) => w !== '' && !isRowAnnotation(w));
   const isChordRow = words.length > 0 && words.every(isChordToken);
+  return { segments, isChordRow };
+}
+
+/** A bracket mark that draws as a heading rather than as chords. */
+const isHeadingMark = (mark: string) => mark.startsWith('[') && HEADING_RE.test(mark.slice(1, -1));
+
+/**
+ * The text with its chords taken out — for reading lyrics only. Chord rows
+ * go entirely (with the blank line they'd leave, so verses stay tight), and
+ * bracketed chord runs inside other lines go too; headings and red text stay.
+ */
+export function stripChords(text: string): string {
+  return text
+    .split('\n')
+    .flatMap((line) => {
+      const { segments, isChordRow } = analyse(line);
+      if (isChordRow) return [];
+      const kept = segments
+        .filter((seg) => !seg.mark || !seg.text.startsWith('[') || isHeadingMark(seg.text))
+        .map((seg) => seg.text)
+        .join('');
+      // A line that was nothing but bracketed chords is a chord row too.
+      return kept.trim() === '' && line.trim() !== '' ? [] : [kept];
+    })
+    .join('\n');
+}
+
+function renderLine(line: string): ReactNode {
+  const { segments, isChordRow } = analyse(line);
 
   return segments.map((seg, i) => {
     if (seg.mark && seg.text.startsWith('[')) {
@@ -167,28 +202,102 @@ const chartStyleFor = (fontSize: number) => ({
 
 /** The view alone — the chart drawn from text, no editing. ChartV2 uses it,
  *  and so does the guide, so an example there is drawn by the real thing. */
-export function ChartV2Text({ text, fontSize }: { text: string; fontSize: number }) {
+/** Space between the two columns when the chart splits. */
+const COLUMN_GAP = '2.5rem';
+
+/**
+ * The lines grouped into blocks a column break must not split: a chord row
+ * and the lyric under it travel together, so chords are never stranded at
+ * the foot of one column with their words atop the next. Everything else is
+ * a block of its own.
+ */
+function blocksOf(text: string): string[][] {
+  const lines = text.split('\n');
+  const out: string[][] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const next = lines[i + 1];
+    if (next !== undefined && analyse(line).isChordRow && !analyse(next).isChordRow && next.trim() !== '') {
+      out.push([line, next]);
+      i++;
+    } else {
+      out.push([line]);
+    }
+  }
+  return out;
+}
+
+export function ChartV2Text({
+  text,
+  fontSize,
+  columns = 1,
+}: {
+  text: string;
+  fontSize: number;
+  /** 2 flows the chart into two columns — but only when two full-width
+   *  columns fit, falling back to one on anything narrower, the same rule
+   *  as the classic chart. */
+  columns?: number;
+}) {
+  // The natural width of the longest line, kept current by a ResizeObserver
+  // (it moves with the font size, and again when the chart font loads).
+  // Read from the first fragment rect, not the bounding rect: in two columns
+  // the wrapper is fragmented across both and the bounding rect is their
+  // union, which would feed back and flicker. See ChordChart for the story.
+  const innerRef = useRef<HTMLDivElement>(null);
+  const [lineWidth, setLineWidth] = useState(0);
+  useLayoutEffect(() => {
+    const el = innerRef.current;
+    if (!el) return;
+    const measure = () => {
+      const rect = el.getClientRects()[0];
+      if (rect) setLineWidth(Math.ceil(rect.width));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const blocks = useMemo(() => blocksOf(text), [text]);
+
   return (
-    <Box as="pre" className="chart-source" style={chartStyleFor(fontSize)}>
-      {text.split('\n').map((line, i) => (
-        <Fragment key={i}>
-          {i > 0 && '\n'}
-          {renderLine(line)}
-        </Fragment>
-      ))}
+    <Box
+      className="chart-source"
+      style={{
+        ...chartStyleFor(fontSize),
+        ...(columns === 2 && lineWidth > 0
+          ? { columnCount: 2, columnWidth: `${lineWidth}px`, columnGap: COLUMN_GAP }
+          : null),
+      }}
+    >
+      <Box ref={innerRef} width="max-content" maxWidth="none">
+        {blocks.map((block, i) => (
+          <Box key={i} style={{ breakInside: 'avoid' }}>
+            {block.map((line, j) => (
+              // A line is a block of its own height so an empty one still
+              // takes a row — a blank line in the source is a breath between
+              // sections, and it must survive as one.
+              <Box key={j} minH={`${LINE_HEIGHT}em`}>
+                {renderLine(line)}
+              </Box>
+            ))}
+          </Box>
+        ))}
+      </Box>
     </Box>
   );
 }
 
 /** The view: the chart drawn from its stored text, transposed for display
  *  if a key was picked. */
-export default function ChartV2({ value, fromKey, toKey, fontSize }: Props) {
-  const shown = useMemo(
-    () => (fromKey && toKey ? transposeContent(value, fromKey, toKey) : value),
-    [value, fromKey, toKey],
-  );
+export default function ChartV2({ value, fromKey, toKey, fontSize, showChords = true, columns = 1 }: Props) {
+  const shown = useMemo(() => {
+    const keyed = fromKey && toKey ? transposeContent(value, fromKey, toKey) : value;
+    return showChords ? keyed : stripChords(keyed);
+  }, [value, fromKey, toKey, showChords]);
   if (!shown.trim()) return <Text color="gray.500">No lyrics or chords yet.</Text>;
-  return <ChartV2Text text={shown} fontSize={fontSize} />;
+  return <ChartV2Text text={shown} fontSize={fontSize} columns={columns} />;
 }
 
 /**
