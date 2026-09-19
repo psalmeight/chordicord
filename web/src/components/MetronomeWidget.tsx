@@ -1,6 +1,8 @@
-import { Box, Button, Flex, HStack, Text } from '@chakra-ui/react';
+import { Box, Button, Flex, HStack, Stack, Text } from '@chakra-ui/react';
 import { Gauge, Minus, Pause, Play, Plus, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { Select } from '@/components/FormControls';
+import StepButton from '@/components/StepButton';
 import { MAX_BPM, MIN_BPM, useMetronome } from '@/contexts/MetronomeContext';
 
 const BEAT_OPTIONS = [1, 2, 3, 4, 5, 6, 7];
@@ -9,8 +11,8 @@ const TAP_RESET_MS = 2000;
 
 export default function MetronomeWidget() {
   const {
-    bpm, setBpm, beatsPerBar, setBeatsPerBar,
-    playing, currentBeat, tick, start, stop, open, setOpen,
+    bpm, setBpm, stepBpm, beatsPerBar, setBeatsPerBar,
+    playing, currentBeat, tick, start, stop, open, setOpen, editing,
   } = useMetronome();
 
   const tapsRef = useRef<number[]>([]);
@@ -41,6 +43,10 @@ export default function MetronomeWidget() {
       setBpm(60000 / (sum / (taps.length - 1)));
     }
   };
+
+  // Off screen while a song is being edited — the editor's action bar owns
+  // the bottom edge there, and a metronome isn't what you reach for mid-edit.
+  if (editing) return null;
 
   return (
     <Box position="fixed" bottom="20px" right="20px" zIndex={1400} className="no-print">
@@ -114,18 +120,14 @@ export default function MetronomeWidget() {
             <Text fontSize="sm" color="gray.600">
               Beats
             </Text>
-            <select
-              value={beatsPerBar}
-              onChange={(e) => setBeatsPerBar(Number(e.target.value))}
+            <Select
+              value={String(beatsPerBar)}
+              onChange={(v) => setBeatsPerBar(Number(v))}
+              options={BEAT_OPTIONS.map(String)}
               aria-label="Beats per bar"
-              style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--line-2)' }}
-            >
-              {BEAT_OPTIONS.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
+              size="sm"
+              width="72px"
+            />
             <Button size="sm" variant="outline" flex="1" onClick={tap}>
               Tap tempo
             </Button>
@@ -142,12 +144,45 @@ export default function MetronomeWidget() {
         </Box>
       )}
 
+      {/* While it plays, the tempo is a thumb-tap away without opening the
+          panel: faster on top, slower beneath, the live bpm between them —
+          the button itself is icon-only, so this is the only readout. */}
+      {playing && !open && (
+        <Stack gap={2} mb={2} align="flex-end">
+          <StepButton onStep={() => stepBpm(1)} label="Faster">
+            <Plus size={22} />
+          </StepButton>
+          <Flex
+            align="center"
+            justify="center"
+            w="48px"
+            h="28px"
+            borderRadius="full"
+            bg="white"
+            borderWidth="1px"
+            borderColor="gray.200"
+            boxShadow="0 1px 3px rgba(0,0,0,0.2)"
+            fontSize="sm"
+            fontWeight="bold"
+            fontVariantNumeric="tabular-nums"
+            aria-label="Tempo"
+          >
+            {bpm}
+          </Flex>
+          <StepButton onStep={() => stepBpm(-1)} label="Slower">
+            <Minus size={22} />
+          </StepButton>
+        </Stack>
+      )}
+
+      {/* Icon only, always 52px round: the chart guide's button sits directly
+          to its left and relies on this never growing into it. */}
       <Flex justify="flex-end">
         <Button
           borderRadius="full"
           h="52px"
-          w={open ? '52px' : 'auto'}
-          px={open ? 0 : 4}
+          w="52px"
+          px={0}
           colorPalette={playing ? 'green' : 'brand'}
           onClick={() => setOpen(!open)}
           aria-label="Metronome"
@@ -161,11 +196,6 @@ export default function MetronomeWidget() {
           }}
         >
           <Gauge size={20} />
-          {!open && (
-            <Text ml={2} fontVariantNumeric="tabular-nums">
-              {playing ? `${bpm}` : 'Metronome'}
-            </Text>
-          )}
         </Button>
       </Flex>
     </Box>

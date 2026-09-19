@@ -1,6 +1,7 @@
 import { Button, HStack, Text } from '@chakra-ui/react';
 import { Minus, Plus, RotateCcw } from 'lucide-react';
 import { keyOptions, normalizeKey, semitonesBetween } from '@/lib/chords';
+import { Select } from '@/components/FormControls';
 
 interface Props {
   /** The song's own key — what the stored chords are written in. */
@@ -32,23 +33,15 @@ export default function KeySelector({ originalKey, value, onChange }: Props) {
       {/* Matched on the app's spelling, not the stored one: a song saved as
           "Ab" is the same pitch as the "G#" this list offers, and without the
           respelling the dropdown would show a key nobody picked. */}
-      <select
+      <Select
         value={normalizeKey(value)}
-        onChange={(e) => onChange(e.target.value)}
-        style={{
-          padding: '6px 10px',
-          borderRadius: 6,
-          border: '1px solid var(--line-2)',
-          fontWeight: 600,
-          minWidth: 110,
-        }}
-      >
-        {options.map((opt) => (
-          <option key={opt.key} value={opt.key}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
+        onChange={onChange}
+        options={options.map((opt) => ({ value: opt.key, label: opt.label }))}
+        size="sm"
+        width="auto"
+        minW="110px"
+        triggerProps={{ fontWeight: 'semibold' }}
+      />
 
       <Button size="sm" variant="outline" onClick={() => step(1)} aria-label="Up a semitone">
         <Plus size={14} />

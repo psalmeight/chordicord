@@ -1,18 +1,24 @@
 import {
   Badge, Box, Button, Flex, HStack, Heading, Spinner, Stack, Text,
 } from '@chakra-ui/react';
-import { ArrowLeft, Columns2, FileDown, Gauge, Minus, Pencil, Plus, Printer } from 'lucide-react';
+import { ArrowLeft, Columns2, FileDown, Gauge, Pencil, Printer } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import api, { apiError } from '@/lib/api';
 import { canEdit } from '@/lib/auth';
 import { capoKey } from '@/lib/chords';
+import { useChartFontSize } from '@/lib/useChartFontSize';
+import { useEditorV2 } from '@/lib/useEditorV2';
+import { toV2Draft } from '@/lib/v2draft';
 import type { PdfSong } from '@/lib/pdf';
 import { useApp } from '@/contexts/AppContext';
 import { useMetronome } from '@/contexts/MetronomeContext';
+import ArchivedBanner from '@/components/ArchivedBanner';
 import AudioPlayer from '@/components/AudioPlayer';
 import AudioUpload from '@/components/AudioUpload';
+import ChartV2 from '@/components/ChartV2';
 import ChordChart from '@/components/ChordChart';
+import { CAPO_OPTIONS, Select } from '@/components/FormControls';
 import KeySelector from '@/components/KeySelector';
 import { NoteCardList } from '@/components/NoteCardView';
 import { groupNotes } from '@/lib/noteColors';
@@ -28,7 +34,11 @@ export default function SongView() {
   // View state, all local and non-destructive — nothing here is ever saved.
   const [displayKey, setDisplayKey] = useState('');
   const [capo, setCapo] = useState(0);
-  const [fontSize, setFontSize] = useState(15);
+  // The one exception: the chart size, set once for every chart from the
+  // header and remembered on the device.
+  const [fontSize] = useChartFontSize();
+  // The v2 chart, app-wide from the header. See ChartV2.
+  const [v2] = useEditorV2();
   const [showChords, setShowChords] = useState(true);
   const [hasAudio, setHasAudio] = useState(false);
   // Bumped on upload so the player remounts and pulls a fresh signed URL.
@@ -115,6 +125,22 @@ export default function SongView() {
     await api.patch(`/api/songs/${id}`, { chartColumns: columns });
   };
 
+  // The v2 text, or — until the song has been saved in v2 — a draft laid out
+  // from the classic chart, so a song never shows blank. Nothing is written
+  // by the view; the editor does that.
+  const v2Text = song?.contentV2 || toV2Draft(song?.content ?? '');
+
+  // An archived song still opens (setlists link here), so offer the way back
+  // in place rather than sending the editor off to the Archive page.
+  const restore = async () => {
+    try {
+      const { data } = await api.post<Song>(`/api/songs/${id}/restore`);
+      setSong(data);
+    } catch (err) {
+      setError(apiError(err, 'Could not restore song'));
+    }
+  };
+
   // The reference track carries its own pitch control and is not driven from
   // here: the key describes the chart, which the recording may not match.
 
@@ -159,6 +185,14 @@ export default function SongView() {
           )}
         </HStack>
       </Flex>
+
+      {song.archivedAt && (
+        <ArchivedBanner
+          what="song"
+          archivedAt={song.archivedAt}
+          onRestore={canEdit(user) ? restore : undefined}
+        />
+      )}
 
       <Box bg="white" p={6} borderRadius="lg" borderWidth="1px">
         <Heading size="xl">{song.title}</Heading>
@@ -205,41 +239,29 @@ export default function SongView() {
                 <Text fontSize="sm" fontWeight="medium" color="gray.600">
                   Capo
                 </Text>
-                <select
-                  value={capo}
-                  onChange={(e) => setCapo(Number(e.target.value))}
-                  style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--line-2)' }}
-                >
-                  <option value={0}>None</option>
-                  {Array.from({ length: 11 }, (_, i) => i + 1).map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
+                <Select
+                  value={String(capo)}
+                  onChange={(v) => setCapo(Number(v))}
+                  options={CAPO_OPTIONS}
+                  size="sm"
+                  width="auto"
+                  minW="88px"
+                />
               </HStack>
             </>
           )}
 
-          <HStack gap={1}>
-            <Text fontSize="sm" fontWeight="medium" color="gray.600" mr={1}>
-              Size
-            </Text>
-            <Button size="xs" variant="outline" onClick={() => setFontSize((s) => Math.max(11, s - 1))}>
-              <Minus size={12} />
+          {/* The v2 chart is plain text: chords can't be hidden and it has
+              no column layout, so those two controls step aside for it. */}
+          {!v2 && (
+            <Button size="sm" variant={showChords ? 'subtle' : 'outline'} onClick={() => setShowChords((v) => !v)}>
+              {showChords ? 'Hide chords' : 'Show chords'}
             </Button>
-            <Button size="xs" variant="outline" onClick={() => setFontSize((s) => Math.min(28, s + 1))}>
-              <Plus size={12} />
-            </Button>
-          </HStack>
-
-          <Button size="sm" variant={showChords ? 'subtle' : 'outline'} onClick={() => setShowChords((v) => !v)}>
-            {showChords ? 'Hide chords' : 'Show chords'}
-          </Button>
+          )}
 
           {/* Saved to the song, so it is offered only where there's a chart to
               lay out and only to those who may change one. */}
-          {canEdit(user) && song.content.trim() && (
+          {!v2 && canEdit(user) && song.content.trim() && (
             <Button
               size="sm"
               variant={song.chartColumns === 2 ? 'subtle' : 'outline'}
@@ -327,7 +349,14 @@ export default function SongView() {
       )}
 
       <Box bg="white" p={6} borderRadius="lg" borderWidth="1px">
-        {song.content.trim() ? (
+        {v2 ? (
+          <ChartV2
+            value={v2Text}
+            fromKey={song.key ?? ''}
+            toKey={hasKey ? chartKey : ''}
+            fontSize={fontSize}
+          />
+        ) : song.content.trim() ? (
           <ChordChart
             content={song.content}
             fromKey={song.key ?? ''}

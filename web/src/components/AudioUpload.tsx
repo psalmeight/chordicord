@@ -9,6 +9,8 @@ interface Props {
   songId: string;
   hasExisting: boolean;
   onUploaded: () => void;
+  /** A sentence to run on after the size limit, inline with the button. */
+  hint?: string;
 }
 
 /**
@@ -18,7 +20,7 @@ interface Props {
  * 4.5MB and MP3s routinely exceed that. The API only mints a signed URL and
  * records the result once the browser reports the PUT succeeded.
  */
-export default function AudioUpload({ songId, hasExisting, onUploaded }: Props) {
+export default function AudioUpload({ songId, hasExisting, onUploaded, hint }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState('');
@@ -81,7 +83,7 @@ export default function AudioUpload({ songId, hasExisting, onUploaded }: Props) 
           <Text ml={2}>{hasExisting ? 'Replace track' : 'Attach MP3'}</Text>
         </Button>
         <Text fontSize="xs" color="gray.500">
-          MP3 up to 20MB
+          MP3 up to 20MB{hint ? ` · ${hint}` : ''}
         </Text>
       </Flex>
 

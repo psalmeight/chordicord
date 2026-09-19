@@ -22,11 +22,19 @@ export interface Song {
   content: string;
   /** How many columns the chart renders in (1 or 2). */
   chartColumns: number;
+  /** The v2 chart: plain chords-over-lyrics text, shown exactly as typed.
+   *  '' until first saved in the new editor — until then the client shows a
+   *  draft derived from `content`. Experimental; `content` stays the source
+   *  for setlists and PDFs. */
+  contentV2: string;
   createdBy: string | null;
   updatedBy: string | null;
   updatedByName: string | null;
   createdAt: string;
   updatedAt: string;
+  /** null while the song is live; set once it's been archived (hidden from
+   *  the songbank, but still loadable — see the Archive page). */
+  archivedAt: string | null;
   hasAudio: boolean;
 }
 
@@ -68,6 +76,8 @@ export interface Setlist {
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+  /** null while live; set once archived (hidden from the list, not deleted). */
+  archivedAt: string | null;
 }
 
 /** A setlist item owns a snapshot copy of its song, taken when it was added.
@@ -94,6 +104,8 @@ export interface SetlistItem {
   noteCards: NoteCard[];
   /** How many columns the chart renders in (1 or 2) — part of the snapshot. */
   chartColumns: number;
+  /** The item's snapshot of the v2 chart ('' until copied or saved here). */
+  contentV2: string;
   /** Whether the song has a reference recording to play along with. */
   hasAudio: boolean;
   /** The recording's own saved tune — the fallback when tuneOffset is null. */

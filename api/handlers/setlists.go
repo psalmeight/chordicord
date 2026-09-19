@@ -11,12 +11,19 @@ import (
 	"transcode/api/models"
 )
 
+const setlistColumns = `id, name, service_date, notes, created_by, created_at, updated_at, archived_at`
+
 func ListSetlists(database *sqlx.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// archived=1 flips to the archive (see ListSongs), newest-archived first.
+		archived := c.Query("archived") == "1"
 		setlists := []models.Setlist{}
 		err := database.Select(&setlists,
-			`SELECT id, name, service_date, notes, created_by, created_at, updated_at
-			 FROM setlists ORDER BY COALESCE(service_date, created_at::date) DESC, created_at DESC`)
+			`SELECT `+setlistColumns+`
+			 FROM setlists
+			 WHERE (archived_at IS NOT NULL) = $1
+			 ORDER BY archived_at DESC NULLS LAST, COALESCE(service_date, created_at::date) DESC, created_at DESC`,
+			archived)
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Failed to load setlists"})
 			return
@@ -35,8 +42,7 @@ func GetSetlist(database *sqlx.DB) gin.HandlerFunc {
 
 		var setlist models.Setlist
 		err := database.Get(&setlist,
-			`SELECT id, name, service_date, notes, created_by, created_at, updated_at
-			 FROM setlists WHERE id = $1`, id)
+			`SELECT `+setlistColumns+` FROM setlists WHERE id = $1`, id)
 		if err != nil {
 			c.JSON(404, gin.H{"error": "Setlist not found"})
 			return
@@ -46,7 +52,7 @@ func GetSetlist(database *sqlx.DB) gin.HandlerFunc {
 		err = database.Select(&items, `
 			SELECT i.id, i.setlist_id, i.song_id, i.position, i.key_override, i.tune_offset, i.notes,
 			       i.title, i.artist, i.song_key, i.time_signature, i.tempo, i.feel, i.content, i.note_cards,
-			       i.chart_columns,
+			       i.chart_columns, i.content_v2,
 			       (a.song_id IS NOT NULL) AS has_audio,
 			       COALESCE(a.tune_offset, 0) AS audio_tune_offset,
 			       COALESCE(p.capo, 0) AS my_capo,
@@ -82,7 +88,7 @@ func CreateSetlist(database *sqlx.DB) gin.HandlerFunc {
 		err := database.Get(&setlist, `
 			INSERT INTO setlists (name, service_date, notes, created_by)
 			VALUES ($1, $2, $3, $4)
-			RETURNING id, name, service_date, notes, created_by, created_at, updated_at`,
+			RETURNING `+setlistColumns,
 			strings.TrimSpace(body.Name), body.ServiceDate, body.Notes, user.ID)
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Failed to create setlist"})
@@ -112,7 +118,7 @@ func UpdateSetlist(database *sqlx.DB) gin.HandlerFunc {
 				notes        = COALESCE($3, notes),
 				updated_at   = NOW()
 			WHERE id = $4
-			RETURNING id, name, service_date, notes, created_by, created_at, updated_at`,
+			RETURNING `+setlistColumns,
 			body.Name, body.ServiceDate, body.Notes, c.Param("id"))
 		if err != nil {
 			c.JSON(404, gin.H{"error": "Setlist not found"})
@@ -122,6 +128,28 @@ func UpdateSetlist(database *sqlx.DB) gin.HandlerFunc {
 	}
 }
 
+// SetSetlistArchived archives or restores a setlist — the soft delete the
+// setlist page offers. Items and everyone's prefs stay put; only the hard
+// DELETE below (archive page only) cascades them away.
+func SetSetlistArchived(database *sqlx.DB, archived bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var setlist models.Setlist
+		err := database.Get(&setlist, `
+			UPDATE setlists SET
+				archived_at = CASE WHEN $1 THEN COALESCE(archived_at, NOW()) ELSE NULL END,
+				updated_at  = NOW()
+			WHERE id = $2
+			RETURNING `+setlistColumns,
+			archived, c.Param("id"))
+		if err != nil {
+			c.JSON(404, gin.H{"error": "Setlist not found"})
+			return
+		}
+		c.JSON(200, setlist)
+	}
+}
+
+// DeleteSetlist is permanent and only reachable from the archive page.
 func DeleteSetlist(database *sqlx.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		res, err := database.Exec(`DELETE FROM setlists WHERE id = $1`, c.Param("id"))
@@ -156,11 +184,11 @@ func AddSetlistItem(database *sqlx.DB) gin.HandlerFunc {
 		err := database.QueryRowx(`
 			INSERT INTO setlist_items
 				(setlist_id, song_id, position, key_override, notes,
-				 title, artist, song_key, time_signature, tempo, feel, content, note_cards, chart_columns)
+				 title, artist, song_key, time_signature, tempo, feel, content, note_cards, chart_columns, content_v2)
 			SELECT $1, s.id,
 			       (SELECT COALESCE(MAX(position), -1) + 1 FROM setlist_items WHERE setlist_id = $1),
 			       $3, $4,
-			       s.title, s.artist, s.song_key, s.time_signature, s.tempo, s.feel, s.content, s.note_cards, s.chart_columns
+			       s.title, s.artist, s.song_key, s.time_signature, s.tempo, s.feel, s.content, s.note_cards, s.chart_columns, s.content_v2
 			FROM songs s WHERE s.id = $2
 			RETURNING id`,
 			setlistID, body.SongID, body.KeyOverride, body.Notes).Scan(&id)
@@ -201,6 +229,7 @@ func UpdateSetlistItem(database *sqlx.DB) gin.HandlerFunc {
 			Content       *string           `json:"content"`
 			NoteCards     *models.NoteCards `json:"noteCards"`
 			ChartColumns  *int              `json:"chartColumns"`
+			ContentV2     *string           `json:"contentV2"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(400, gin.H{"error": "Invalid request"})
@@ -227,12 +256,13 @@ func UpdateSetlistItem(database *sqlx.DB) gin.HandlerFunc {
 				feel           = COALESCE($13, feel),
 				content        = COALESCE($14, content),
 				note_cards     = COALESCE($15::jsonb, note_cards),
-				chart_columns  = COALESCE($16, chart_columns)
+				chart_columns  = COALESCE($16, chart_columns),
+				content_v2     = COALESCE($19, content_v2)
 			WHERE id = $17 AND setlist_id = $18`,
 			body.ClearKey, body.KeyOverride, body.ClearTune, body.TuneOffset, body.Notes,
 			body.Title, body.Artist, body.ClearSongKey, body.SongKey, body.TimeSignature,
 			body.ClearTempo, body.Tempo, body.Feel, body.Content, noteCards, body.ChartColumns,
-			c.Param("itemId"), c.Param("id"))
+			c.Param("itemId"), c.Param("id"), body.ContentV2)
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Failed to update item"})
 			return
@@ -251,7 +281,7 @@ func ResyncSetlistItem(database *sqlx.DB) gin.HandlerFunc {
 				title = s.title, artist = s.artist, song_key = s.song_key,
 				time_signature = s.time_signature, tempo = s.tempo, feel = s.feel,
 				content = s.content, note_cards = s.note_cards,
-				chart_columns = s.chart_columns,
+				chart_columns = s.chart_columns, content_v2 = s.content_v2,
 				key_override = NULL
 			FROM songs s
 			WHERE i.id = $1 AND i.setlist_id = $2 AND s.id = i.song_id`,

@@ -204,6 +204,24 @@ func Migrate(database *sqlx.DB) {
 		// collision by name on either a migrated or a freshly-created database.
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS username varchar(64);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS users_username_key ON users (username);`,
+
+		// Soft delete. Archived rows drop out of the normal lists (and the tag
+		// index, and the setlist song picker) but stay fully loadable by id, so
+		// setlist items keep their audio link and a link to an archived song
+		// still opens. The archive page is the only place that restores or
+		// permanently deletes. NULL means live.
+		`ALTER TABLE songs ADD COLUMN IF NOT EXISTS archived_at timestamp;`,
+		`ALTER TABLE setlists ADD COLUMN IF NOT EXISTS archived_at timestamp;`,
+
+		// The "v2" chart: plain chords-over-lyrics text, shown exactly as
+		// typed, alongside (never instead of) the ChordPro `content` column.
+		// Deliberately no backfill — the client derives a first draft from
+		// `content` on demand and only writes here when someone saves in the
+		// new editor, so no existing chart is touched until then.
+		`ALTER TABLE songs ADD COLUMN IF NOT EXISTS content_v2 text NOT NULL DEFAULT '';`,
+		// The setlist item's snapshot of it, copied at add-time and on resync
+		// like every other chart field. Same no-backfill rule.
+		`ALTER TABLE setlist_items ADD COLUMN IF NOT EXISTS content_v2 text NOT NULL DEFAULT '';`,
 	}
 
 	for _, s := range stmts {
