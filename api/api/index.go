@@ -4,7 +4,6 @@ package handler
 
 import (
 	"net/http"
-	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -27,25 +26,7 @@ func boot() {
 	app = router.New(database, cfg)
 }
 
-// pathParam is the query key vercel.json stuffs the original path into.
-// Unlike the Node runtime, Vercel's Go runtime hands a rewritten request the
-// *destination* path ("/api/index"), so without this every route 404s.
-const pathParam = "__path"
-
-func restorePath(r *http.Request) {
-	q := r.URL.Query()
-	if !q.Has(pathParam) {
-		return
-	}
-	r.URL.Path = "/" + strings.TrimLeft(q.Get(pathParam), "/")
-	r.URL.RawPath = ""
-	q.Del(pathParam)
-	r.URL.RawQuery = q.Encode()
-	r.RequestURI = r.URL.RequestURI()
-}
-
 func Handler(w http.ResponseWriter, r *http.Request) {
 	once.Do(boot)
-	restorePath(r)
 	app.ServeHTTP(w, r)
 }

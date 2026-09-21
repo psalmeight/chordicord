@@ -156,8 +156,13 @@ DELETE /api/users/:id             admin
 
 Two Vercel projects, as in `doctrine`:
 
-- `api/` — `vercel.json` rewrites everything to the single Go function at
-  `api/index.go`. Set `DATABASE_URL`, `JWT_SECRET`, `WEB_URL`.
+- `api/` — Framework preset **Go**, root directory `api`. Vercel builds
+  `main.go` as a standalone server (it listens on `PORT`) and gin does all
+  routing, so there is deliberately no `vercel.json`: with this preset a
+  rewrite changes the path gin sees and every route 404s. `api/index.go` is
+  only used if the preset is switched to "Other" (per-file functions).
+  Set `DATABASE_URL`, `JWT_SECRET`, `WEB_URL` (include the deployed web
+  origin, first).
 - `web/` — `vercel.json` provides the SPA history fallback. Set `VITE_API_URL`.
 
 ## Notes on the auth design
