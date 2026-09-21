@@ -1,6 +1,7 @@
 import { Box, Button, Flex, Text } from '@chakra-ui/react';
 import { Info, X } from 'lucide-react';
 import { useState } from 'react';
+import { useMetronome } from '@/contexts/MetronomeContext';
 import ChordChart from '@/components/ChordChart';
 
 /**
@@ -65,10 +66,16 @@ export const RULES: { source: string; caption: string; hidden?: boolean }[] = [
  */
 export default function ChartSyntaxGuide() {
   const [open, setOpen] = useState(false);
+  const { editing } = useMetronome();
 
-  // Parked one button-height above the metronome, which owns bottom: 20px. A
-  // step above it in the stack too: the metronome's own panel opens upward
-  // through this spot, and would otherwise bury the button it sits under.
+  // Only while a song is being edited: the format is a question for whoever
+  // is writing a chart, and on every other page the button is one more thing
+  // floating over a chart someone is trying to read. The metronome is gone
+  // while editing and the editor's action bar takes the bottom edge, so this
+  // sits in the corner one bar-height up — a thumb away from the chart being
+  // typed, and above the metronome's slot in the stack in case both show.
+  if (!editing) return null;
+
   return (
     <Box position="fixed" bottom="84px" right="20px" zIndex={1401} className="no-print">
       {open && (

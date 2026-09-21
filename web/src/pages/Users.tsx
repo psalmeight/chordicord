@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import api, { apiError } from '@/lib/api';
 import type { Role, User } from '@/lib/auth';
 import { useApp } from '@/contexts/AppContext';
+import { Select } from '@/components/FormControls';
 
 const ROLES: Role[] = ['admin', 'leader', 'member'];
 
@@ -126,17 +127,13 @@ export default function Users() {
               onChange={(e) => setForm({ ...form, username: e.target.value })}
               maxW="200px"
             />
-            <select
+            <Select
               value={form.role}
-              onChange={(e) => setForm({ ...form, role: e.target.value as Role })}
-              style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid var(--line)' }}
-            >
-              {ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => setForm({ ...form, role: v as Role })}
+              options={ROLES}
+              width="auto"
+              minW="120px"
+            />
             <Button colorPalette="brand" onClick={invite}>
               Create invite
             </Button>
@@ -222,17 +219,14 @@ export default function Users() {
                       New link
                     </Button>
                   )}
-                  <select
+                  <Select
                     value={u.role}
-                    onChange={(e) => changeRole(u.id, e.target.value as Role)}
-                    style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--line-2)' }}
-                  >
-                    {ROLES.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(v) => changeRole(u.id, v as Role)}
+                    options={ROLES}
+                    size="sm"
+                    width="auto"
+                    minW="110px"
+                  />
                   {u.id !== me?.id && (
                     <Button size="xs" variant="ghost" colorPalette="red" onClick={() => remove(u)}>
                       <Trash2 size={14} />

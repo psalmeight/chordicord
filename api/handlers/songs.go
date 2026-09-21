@@ -15,8 +15,8 @@ import (
 
 const songSelect = `
 	SELECT s.id, s.title, s.artist, s.song_key, s.time_signature, s.tempo, s.feel,
-	       s.ccli, s.notes, s.note_cards, s.tags, s.content, s.chart_columns, s.created_by, s.updated_by,
-	       s.created_at, s.updated_at, u.name AS updated_by_name,
+	       s.ccli, s.notes, s.note_cards, s.tags, s.content, s.chart_columns, s.content_v2, s.created_by, s.updated_by,
+	       s.created_at, s.updated_at, s.archived_at, u.name AS updated_by_name,
 	       EXISTS(SELECT 1 FROM song_audio a WHERE a.song_id = s.id) AS has_audio
 	FROM songs s
 	LEFT JOIN users u ON u.id = s.updated_by`
@@ -34,6 +34,7 @@ type songBody struct {
 	Tags          *[]string         `json:"tags"`
 	Content       *string           `json:"content"`
 	ChartColumns  *int              `json:"chartColumns"`
+	ContentV2     *string           `json:"contentV2"`
 }
 
 // chartColumnsValid rejects anything but the two layouts the chart renders.
@@ -45,22 +46,27 @@ func ListSongs(database *sqlx.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		q := strings.TrimSpace(c.Query("q"))
 		tag := strings.TrimSpace(c.Query("tag"))
+		// The songbank and the archive are two disjoint lists over one table:
+		// archived=1 flips to the archive, which sorts newest-archived first
+		// because that's the one you most likely want back.
+		archived := c.Query("archived") == "1"
 
 		// Content is deliberately excluded from the list payload — song bodies
 		// are large and the index only renders metadata.
 		query := `
 			SELECT s.id, s.title, s.artist, s.song_key, s.time_signature, s.tempo, s.feel,
-			       s.ccli, s.notes, s.note_cards, s.tags, '' AS content, s.chart_columns, s.created_by, s.updated_by,
-			       s.created_at, s.updated_at, u.name AS updated_by_name,
+			       s.ccli, s.notes, s.note_cards, s.tags, '' AS content, s.chart_columns, '' AS content_v2, s.created_by, s.updated_by,
+			       s.created_at, s.updated_at, s.archived_at, u.name AS updated_by_name,
 			       EXISTS(SELECT 1 FROM song_audio a WHERE a.song_id = s.id) AS has_audio
 			FROM songs s
 			LEFT JOIN users u ON u.id = s.updated_by
 			WHERE ($1 = '' OR s.title ILIKE '%' || $1 || '%' OR s.artist ILIKE '%' || $1 || '%')
 			  AND ($2 = '' OR $2 = ANY(s.tags))
-			ORDER BY s.title`
+			  AND (s.archived_at IS NOT NULL) = $3
+			ORDER BY s.archived_at DESC NULLS LAST, s.title`
 
 		songs := []models.SongWithAuthor{}
-		if err := database.Select(&songs, query, q, tag); err != nil {
+		if err := database.Select(&songs, query, q, tag, archived); err != nil {
 			c.JSON(500, gin.H{"error": "Failed to load songs"})
 			return
 		}
@@ -103,12 +109,12 @@ func CreateSong(database *sqlx.DB) gin.HandlerFunc {
 
 		var id string
 		err := database.QueryRowx(`
-			INSERT INTO songs (title, artist, song_key, time_signature, tempo, feel, ccli, notes, note_cards, tags, content, chart_columns, created_by, updated_by)
+			INSERT INTO songs (title, artist, song_key, time_signature, tempo, feel, ccli, notes, note_cards, tags, content, chart_columns, content_v2, created_by, updated_by)
 			VALUES ($1, COALESCE($2,''), $3, COALESCE($4,'4/4'), $5, COALESCE($6,''),
-			        COALESCE($7,''), COALESCE($8,''), COALESCE($9::jsonb,'[]'::jsonb), $10, COALESCE($11,''), COALESCE($13,1), $12, $12)
+			        COALESCE($7,''), COALESCE($8,''), COALESCE($9::jsonb,'[]'::jsonb), $10, COALESCE($11,''), COALESCE($13,1), COALESCE($14,''), $12, $12)
 			RETURNING id`,
 			strings.TrimSpace(*body.Title), body.Artist, body.Key, body.TimeSignature, body.Tempo,
-			body.Feel, body.CCLI, body.Notes, noteCards, tags, body.Content, user.ID, body.ChartColumns).Scan(&id)
+			body.Feel, body.CCLI, body.Notes, noteCards, tags, body.Content, user.ID, body.ChartColumns, body.ContentV2).Scan(&id)
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Failed to create song"})
 			return
@@ -171,19 +177,20 @@ func UpdateSong(database *sqlx.DB) gin.HandlerFunc {
 					tags           = COALESCE($10, tags),
 					content        = COALESCE($11, content),
 					chart_columns  = COALESCE($16, chart_columns),
+					content_v2     = COALESCE($17, content_v2),
 					updated_by     = $12,
 					updated_at     = NOW()
 				WHERE id = $13
 				RETURNING *
 			)
 			SELECT s.id, s.title, s.artist, s.song_key, s.time_signature, s.tempo, s.feel,
-			       s.ccli, s.notes, s.note_cards, s.tags, s.content, s.chart_columns, s.created_by, s.updated_by,
-			       s.created_at, s.updated_at, u.name AS updated_by_name,
+			       s.ccli, s.notes, s.note_cards, s.tags, s.content, s.chart_columns, s.content_v2, s.created_by, s.updated_by,
+			       s.created_at, s.updated_at, s.archived_at, u.name AS updated_by_name,
 			       EXISTS(SELECT 1 FROM song_audio a WHERE a.song_id = s.id) AS has_audio
 			FROM updated s LEFT JOIN users u ON u.id = s.updated_by`,
 			body.Title, body.Artist, body.Key, body.TimeSignature, clearTempo, body.Tempo,
 			body.Feel, body.CCLI, body.Notes, tags, body.Content, user.ID, id, clearKey, noteCards,
-			body.ChartColumns)
+			body.ChartColumns, body.ContentV2)
 		if err != nil {
 			c.JSON(404, gin.H{"error": "Song not found"})
 			return
@@ -192,6 +199,39 @@ func UpdateSong(database *sqlx.DB) gin.HandlerFunc {
 	}
 }
 
+// SetSongArchived archives (archived=true) or restores (false) a song. Archiving
+// is the soft delete the editor offers; the hard DELETE below is only reachable
+// from the archive page, so nothing is gone for good without passing through
+// here first. Restoring an already-live song is a harmless no-op.
+func SetSongArchived(database *sqlx.DB, archived bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		user := middleware.GetUser(c)
+		var song models.SongWithAuthor
+		err := database.Get(&song, `
+			WITH updated AS (
+				UPDATE songs SET
+					archived_at = CASE WHEN $1 THEN COALESCE(archived_at, NOW()) ELSE NULL END,
+					updated_by  = $2,
+					updated_at  = NOW()
+				WHERE id = $3
+				RETURNING *
+			)
+			SELECT s.id, s.title, s.artist, s.song_key, s.time_signature, s.tempo, s.feel,
+			       s.ccli, s.notes, s.note_cards, s.tags, s.content, s.chart_columns, s.content_v2, s.created_by, s.updated_by,
+			       s.created_at, s.updated_at, s.archived_at, u.name AS updated_by_name,
+			       EXISTS(SELECT 1 FROM song_audio a WHERE a.song_id = s.id) AS has_audio
+			FROM updated s LEFT JOIN users u ON u.id = s.updated_by`,
+			archived, user.ID, c.Param("id"))
+		if err != nil {
+			c.JSON(404, gin.H{"error": "Song not found"})
+			return
+		}
+		c.JSON(200, song)
+	}
+}
+
+// DeleteSong is permanent. It's only offered from the archive page, so a song
+// has to be archived first — that's the safety net, not a confirm dialog.
 func DeleteSong(database *sqlx.DB, store *storage.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// The song_audio row cascades away with the song, so read its storage
@@ -224,7 +264,7 @@ func ListTags(database *sqlx.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tags := []string{}
 		if err := database.Select(&tags,
-			`SELECT DISTINCT unnest(tags) AS tag FROM songs ORDER BY tag`); err != nil {
+			`SELECT DISTINCT unnest(tags) AS tag FROM songs WHERE archived_at IS NULL ORDER BY tag`); err != nil {
 			c.JSON(500, gin.H{"error": "Failed to load tags"})
 			return
 		}

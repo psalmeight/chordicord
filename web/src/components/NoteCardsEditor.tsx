@@ -2,6 +2,7 @@ import { Box, Button, Flex, HStack, Stack, Text, Textarea } from '@chakra-ui/rea
 import { Plus, Trash2 } from 'lucide-react';
 import { sectionNames } from '@/lib/chordpro';
 import { NOTE_COLORS, noteColor } from '@/lib/noteColors';
+import { Select } from '@/components/FormControls';
 import type { NoteCard } from '@/types';
 
 /** The colour-coded note cards editor. `content` is the chart source the
@@ -63,19 +64,15 @@ export default function NoteCardsEditor({
                 ))}
               </HStack>
               <Box flex="1" />
-              <select
+              <Select
                 value={card.section}
-                onChange={(e) => patchCard(i, { section: e.target.value })}
+                onChange={(section) => patchCard(i, { section })}
+                options={['', ...sectionOptions]}
+                emptyLabel="General (top)"
                 title="Where this note appears"
-                style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--line-2)', maxWidth: 170 }}
-              >
-                <option value="">General (top)</option>
-                {sectionOptions.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+                size="sm"
+                width="170px"
+              />
               <Button
                 size="xs"
                 variant="ghost"

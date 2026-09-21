@@ -1,20 +1,25 @@
-import {
-  Badge, Box, Button, Flex, HStack, Heading, Spinner, Stack, Text,
-} from '@chakra-ui/react';
-import { ArrowLeft, Columns2, FileDown, Gauge, Minus, Pencil, Plus, Printer } from 'lucide-react';
+import { Badge, Box, Button, Flex, HStack, Spinner, Stack, Text } from '@chakra-ui/react';
+import { ArrowLeft, Columns2, Eye, EyeOff, FileDown, Gauge, Pencil, Printer } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import api, { apiError } from '@/lib/api';
 import { canEdit } from '@/lib/auth';
-import { capoKey } from '@/lib/chords';
+import { capoKey, keyOptions } from '@/lib/chords';
+import { useChartFontSize } from '@/lib/useChartFontSize';
+import { useEditorV2 } from '@/lib/useEditorV2';
+import { toV2Draft } from '@/lib/v2draft';
 import type { PdfSong } from '@/lib/pdf';
 import { useApp } from '@/contexts/AppContext';
 import { useMetronome } from '@/contexts/MetronomeContext';
+import ArchivedBanner from '@/components/ArchivedBanner';
 import AudioPlayer from '@/components/AudioPlayer';
 import AudioUpload from '@/components/AudioUpload';
+import AutoScrollWidget from '@/components/AutoScrollWidget';
+import ChartV2 from '@/components/ChartV2';
 import ChordChart from '@/components/ChordChart';
-import KeySelector from '@/components/KeySelector';
+import { CAPO_OPTIONS, Select } from '@/components/FormControls';
 import { NoteCardList } from '@/components/NoteCardView';
+import { OptionButton, OptionDivider, OptionRow, OptionsMenu } from '@/components/OptionsMenu';
 import { groupNotes } from '@/lib/noteColors';
 import type { NoteCard, Song } from '@/types';
 
@@ -28,7 +33,11 @@ export default function SongView() {
   // View state, all local and non-destructive — nothing here is ever saved.
   const [displayKey, setDisplayKey] = useState('');
   const [capo, setCapo] = useState(0);
-  const [fontSize, setFontSize] = useState(15);
+  // The one exception: the chart size, set once for every chart from the
+  // header and remembered on the device.
+  const [fontSize] = useChartFontSize();
+  // The v2 chart, app-wide from the header. See ChartV2.
+  const [v2] = useEditorV2();
   const [showChords, setShowChords] = useState(true);
   const [hasAudio, setHasAudio] = useState(false);
   // Bumped on upload so the player remounts and pulls a fresh signed URL.
@@ -115,12 +124,30 @@ export default function SongView() {
     await api.patch(`/api/songs/${id}`, { chartColumns: columns });
   };
 
+  // The v2 text, or — until the song has been saved in v2 — a draft laid out
+  // from the classic chart, so a song never shows blank. Nothing is written
+  // by the view; the editor does that.
+  const v2Text = song?.contentV2 || toV2Draft(song?.content ?? '');
+
+  // An archived song still opens (setlists link here), so offer the way back
+  // in place rather than sending the editor off to the Archive page.
+  const restore = async () => {
+    try {
+      const { data } = await api.post<Song>(`/api/songs/${id}/restore`);
+      setSong(data);
+    } catch (err) {
+      setError(apiError(err, 'Could not restore song'));
+    }
+  };
+
   // The reference track carries its own pitch control and is not driven from
   // here: the key describes the chart, which the recording may not match.
 
+  const transposed = hasKey && displayKey !== song.key;
+
   return (
     <Stack gap={4}>
-      <Flex justify="space-between" align="start" gap={3} wrap="wrap" className="no-print">
+      <Flex justify="space-between" align="center" wrap="wrap" gap={3} className="no-print">
         <Link to="/">
           <Button size="sm" variant="ghost">
             <ArrowLeft size={16} />
@@ -149,134 +176,138 @@ export default function SongView() {
             <FileDown size={16} />
             <Text ml={1}>PDF</Text>
           </Button>
-          {canEdit(user) && (
-            <Link to={`/songs/${song.id}/edit`}>
-              <Button size="sm" colorPalette="brand">
-                <Pencil size={16} />
-                <Text ml={1}>Edit</Text>
-              </Button>
-            </Link>
-          )}
         </HStack>
       </Flex>
 
-      <Box bg="white" p={6} borderRadius="lg" borderWidth="1px">
-        <Heading size="xl">{song.title}</Heading>
-        {song.artist && <Text color="gray.600">{song.artist}</Text>}
+      {song.archivedAt && (
+        <ArchivedBanner
+          what="song"
+          archivedAt={song.archivedAt}
+          onRestore={canEdit(user) ? restore : undefined}
+        />
+      )}
 
-        <HStack gap={4} mt={3} fontSize="sm" color="gray.700" wrap="wrap">
-          {hasKey ? (
-            <Badge colorPalette="brand">Key of {song.key}</Badge>
-          ) : (
-            <Badge colorPalette="gray" variant="outline">Key not set</Badge>
-          )}
-          <Text>{song.timeSignature}</Text>
-          {song.tempo && <Text>{song.tempo} bpm</Text>}
-          {song.feel && <Text>Feel: {song.feel}</Text>}
-          {song.ccli && <Text>CCLI {song.ccli}</Text>}
-        </HStack>
+      {/* One card in the shape of a setlist item, so a song reads the same
+          wherever it appears: title | key | time on one line, details under
+          it, Edit and Options on the right, then the track and the chart. */}
+      <Box bg="white" p={5} borderRadius="lg" borderWidth="1px">
+        <Flex justify="space-between" align="start" gap={3} wrap="wrap">
+          <Box>
+            <HStack gap={2} wrap="wrap" fontSize="lg">
+              <Text fontWeight="bold">{song.title}</Text>
+              <Text color="gray.300" aria-hidden>|</Text>
+              {hasKey ? (
+                <Text fontWeight="semibold" color="brand.600">{displayKey}</Text>
+              ) : (
+                <Text color="gray.400">No key</Text>
+              )}
+              <Text color="gray.300" aria-hidden>|</Text>
+              <Text color="gray.700">{song.timeSignature}</Text>
+            </HStack>
+            <HStack gap={3} fontSize="sm" color="gray.600" mt={1} wrap="wrap">
+              {song.artist && <Text>{song.artist}</Text>}
+              {hasKey && capo > 0 && (
+                <Badge colorPalette="yellow" title="Capo — only on this screen">
+                  Capo {capo}
+                </Badge>
+              )}
+              {song.tempo && <Text>{song.tempo} bpm</Text>}
+              {song.feel && <Text>{song.feel}</Text>}
+              {song.ccli && <Text>CCLI {song.ccli}</Text>}
+              {transposed && <Badge colorPalette="orange">from {song.key}</Badge>}
+              {song.tags.map((tag) => (
+                <Badge key={tag} variant="outline">
+                  {tag}
+                </Badge>
+              ))}
+            </HStack>
+          </Box>
 
-        {song.tags.length > 0 && (
-          <HStack gap={2} mt={3} wrap="wrap">
-            {song.tags.map((tag) => (
-              <Badge key={tag} variant="outline">
-                {tag}
-              </Badge>
-            ))}
-          </HStack>
-        )}
+          <HStack gap={2} className="no-print">
+            {canEdit(user) && (
+              <Link to={`/songs/${song.id}/edit`}>
+                <Button size="xs" variant="outline">
+                  <Pencil size={14} />
+                  <Text ml={1}>Edit</Text>
+                </Button>
+              </Link>
+            )}
+            {/* Saved to the song, so only for those who may change it, and
+                only where there's a chart to lay out. */}
+            {canEdit(user) && (v2 ? v2Text : song.content).trim() && (
+              <Button
+                size="xs"
+                variant={song.chartColumns === 2 ? 'subtle' : 'outline'}
+                colorPalette={song.chartColumns === 2 ? 'brand' : 'gray'}
+                onClick={() => setColumns(song.chartColumns === 2 ? 1 : 2)}
+                title={
+                  song.chartColumns === 2
+                    ? 'Two columns, saved to the song — click for one. Narrow screens show one either way.'
+                    : 'One column, saved to the song — click to split the chart into two.'
+                }
+              >
+                <Columns2 size={14} />
+                <Text ml={1}>{song.chartColumns === 2 ? '2 columns' : '1 column'}</Text>
+              </Button>
+            )}
+            <OptionsMenu>
+              {hasKey ? (
+                <>
+                  <OptionRow label="Key" hint="Only on this screen">
+                    <Select
+                      value={displayKey}
+                      onChange={setDisplayKey}
+                      options={keyOptions(song.key!).map((opt) => ({ value: opt.key, label: opt.label }))}
+                      size="sm"
+                      triggerProps={{ fontWeight: 'semibold' }}
+                    />
+                  </OptionRow>
+                  <OptionRow label="Capo" hint="Only on this screen">
+                    <Select
+                      value={String(capo)}
+                      onChange={(v) => setCapo(Number(v))}
+                      options={CAPO_OPTIONS.map((o) => ({
+                        value: o.value,
+                        label: o.value === '0' ? 'No capo' : `Capo ${o.value}`,
+                      }))}
+                      size="sm"
+                    />
+                  </OptionRow>
+                  <OptionDivider />
+                </>
+              ) : null}
 
-        <NoteCardList cards={notes.general} mt={4} />
-      </Box>
-
-      {/* Transpose controls */}
-      <Box bg="white" p={4} borderRadius="lg" borderWidth="1px" className="no-print">
-        <Flex gap={5} wrap="wrap" align="center">
-          {hasKey && (
-            <>
-              <HStack gap={3}>
-                <Text fontSize="sm" fontWeight="medium" color="gray.600">
-                  Key
-                </Text>
-                <KeySelector originalKey={song.key!} value={displayKey} onChange={setDisplayKey} />
-              </HStack>
-
-              <HStack gap={2}>
-                <Text fontSize="sm" fontWeight="medium" color="gray.600">
-                  Capo
-                </Text>
-                <select
-                  value={capo}
-                  onChange={(e) => setCapo(Number(e.target.value))}
-                  style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--line-2)' }}
+              {song.tempo && (
+                <OptionButton
+                  icon={<Gauge size={16} />}
+                  onClick={() => playAt(song.tempo!, Number(song.timeSignature.split('/')[0]) || undefined)}
                 >
-                  <option value={0}>None</option>
-                  {Array.from({ length: 11 }, (_, i) => i + 1).map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
-              </HStack>
-            </>
-          )}
+                  Metronome at {song.tempo}
+                </OptionButton>
+              )}
 
-          <HStack gap={1}>
-            <Text fontSize="sm" fontWeight="medium" color="gray.600" mr={1}>
-              Size
-            </Text>
-            <Button size="xs" variant="outline" onClick={() => setFontSize((s) => Math.max(11, s - 1))}>
-              <Minus size={12} />
-            </Button>
-            <Button size="xs" variant="outline" onClick={() => setFontSize((s) => Math.min(28, s + 1))}>
-              <Plus size={12} />
-            </Button>
+              {/* The v2 chart is plain text: chords can't be hidden and it has
+                  no column layout, so those two step aside for it. */}
+              {!v2 && (
+                <OptionButton
+                  icon={showChords ? <EyeOff size={16} /> : <Eye size={16} />}
+                  onClick={() => setShowChords((v) => !v)}
+                >
+                  {showChords ? 'Hide chords' : 'Show chords'}
+                </OptionButton>
+              )}
+            </OptionsMenu>
           </HStack>
-
-          <Button size="sm" variant={showChords ? 'subtle' : 'outline'} onClick={() => setShowChords((v) => !v)}>
-            {showChords ? 'Hide chords' : 'Show chords'}
-          </Button>
-
-          {/* Saved to the song, so it is offered only where there's a chart to
-              lay out and only to those who may change one. */}
-          {canEdit(user) && song.content.trim() && (
-            <Button
-              size="sm"
-              variant={song.chartColumns === 2 ? 'subtle' : 'outline'}
-              colorPalette={song.chartColumns === 2 ? 'brand' : 'gray'}
-              onClick={() => setColumns(song.chartColumns === 2 ? 1 : 2)}
-              title={
-                song.chartColumns === 2
-                  ? 'Two columns, saved to the song — click for one. Narrow screens show one either way.'
-                  : 'One column, saved to the song — click to split the chart into two.'
-              }
-            >
-              <Columns2 size={14} />
-              <Text ml={1}>{song.chartColumns === 2 ? '2 columns' : '1 column'}</Text>
-            </Button>
-          )}
-
-          {song.tempo && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => playAt(song.tempo!, Number(song.timeSignature.split('/')[0]) || undefined)}
-              title="Start the metronome at this song's tempo"
-            >
-              <Gauge size={14} />
-              <Text ml={1}>Metronome {song.tempo}</Text>
-            </Button>
-          )}
         </Flex>
 
         {hasKey && capo > 0 && (
-          <Text fontSize="sm" color="gray.600" mt={3}>
+          <Text fontSize="sm" color="gray.600" mt={2} className="no-print">
             Capo {capo} — play <strong>{chartKey}</strong> shapes, sounds in <strong>{displayKey}</strong>.
           </Text>
         )}
 
         {!hasKey && (
-          <Text fontSize="sm" color="gray.600" mt={3}>
+          <Text fontSize="sm" color="gray.600" mt={2} className="no-print">
             This song has no key set, so the chart shows exactly as written and the reference track
             plays at its original pitch.{' '}
             {canEdit(user) ? (
@@ -291,56 +322,71 @@ export default function SongView() {
             to turn on transposing and capo.
           </Text>
         )}
-      </Box>
 
-      {/* Reference track. Pitch here is preview-only — the saved, shared tune
-          belongs to each setlist item, not the songbank recording. */}
-      {(hasAudio || canEdit(user)) && (
-        <Box bg="white" p={4} borderRadius="lg" borderWidth="1px" className="no-print">
-          {hasAudio ? (
+        {/* Reference track. Pitch here is preview-only — the saved, shared
+            tune belongs to each setlist item, not the songbank recording. */}
+        {(hasAudio || canEdit(user)) && (
+          <Box mt={3} pt={3} borderTopWidth="1px" className="no-print">
             <Stack gap={3}>
-              <AudioPlayer
-                key={`${song.id}-${audioVersion}`}
-                songId={song.id}
-                canEdit={canEdit(user)}
-                onRemoved={() => setHasAudio(false)}
-              />
+              {hasAudio && (
+                <AudioPlayer
+                  key={`${song.id}-${audioVersion}`}
+                  songId={song.id}
+                  canEdit={canEdit(user)}
+                  onRemoved={() => setHasAudio(false)}
+                />
+              )}
               {canEdit(user) && (
                 <AudioUpload
                   songId={song.id}
-                  hasExisting
-                  onUploaded={() => setAudioVersion((v) => v + 1)}
+                  hasExisting={hasAudio}
+                  onUploaded={() => {
+                    setHasAudio(true);
+                    setAudioVersion((v) => v + 1);
+                  }}
                 />
               )}
             </Stack>
-          ) : (
-            <AudioUpload
-              songId={song.id}
-              hasExisting={false}
-              onUploaded={() => {
-                setHasAudio(true);
-                setAudioVersion((v) => v + 1);
-              }}
-            />
-          )}
-        </Box>
-      )}
+          </Box>
+        )}
 
-      <Box bg="white" p={6} borderRadius="lg" borderWidth="1px">
-        {song.content.trim() ? (
-          <ChordChart
-            content={song.content}
-            fromKey={song.key ?? ''}
-            toKey={hasKey ? chartKey : ''}
-            fontSize={fontSize}
-            showChords={showChords}
-            sectionNotes={notes.bySection}
-            columns={song.chartColumns}
-          />
-        ) : (
-          <Text color="gray.500">No lyrics or chords yet.</Text>
+        {(song.content.trim() || notes.general.length > 0 || v2) && (
+          <Box mt={4} pt={4} borderTopWidth="1px">
+            {v2 ? (
+              <ChartV2
+                value={v2Text}
+                fromKey={song.key ?? ''}
+                toKey={hasKey ? chartKey : ''}
+                fontSize={fontSize}
+                columns={song.chartColumns}
+              />
+            ) : (
+              <>
+                <NoteCardList cards={notes.general} />
+                <Box mt={notes.general.length ? 3 : 0}>
+                  {song.content.trim() ? (
+                    <ChordChart
+                      content={song.content}
+                      fromKey={song.key ?? ''}
+                      toKey={hasKey ? chartKey : ''}
+                      fontSize={fontSize}
+                      showChords={showChords}
+                      sectionNotes={notes.bySection}
+                      columns={song.chartColumns}
+                    />
+                  ) : (
+                    <Text color="gray.500">No lyrics or chords yet.</Text>
+                  )}
+                </Box>
+              </>
+            )}
+          </Box>
         )}
       </Box>
+
+      {/* Hands-free scrolling, as on a setlist — a long chart is a long
+          chart wherever it's read from. */}
+      {(song.content.trim() || v2Text.trim()) && <AutoScrollWidget />}
     </Stack>
   );
 }

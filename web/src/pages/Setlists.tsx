@@ -1,7 +1,7 @@
 import {
   Box, Button, Flex, HStack, Heading, Input, Spinner, Stack, Text,
 } from '@chakra-ui/react';
-import { Plus } from 'lucide-react';
+import { Archive, Plus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -29,6 +29,18 @@ export default function Setlists() {
   useEffect(() => {
     load();
   }, []);
+
+  // Soft delete, same as the setlist page's own Archive: restore or delete
+  // for good from the Archive page.
+  const archive = async (setlist: Setlist) => {
+    if (!window.confirm(`Archive "${setlist.name}"? It leaves the list but can be restored from the Archive page.`)) return;
+    try {
+      await api.post(`/api/setlists/${setlist.id}/archive`);
+      setSetlists((prev) => prev.filter((s) => s.id !== setlist.id));
+    } catch (err) {
+      setError(apiError(err, 'Could not archive setlist'));
+    }
+  };
 
   const create = async () => {
     if (!name.trim()) return;
@@ -83,18 +95,44 @@ export default function Setlists() {
       ) : (
         <Stack gap={2}>
           {setlists.map((setlist) => (
-            <Link key={setlist.id} to={`/setlists/${setlist.id}`}>
-              <Box bg="white" p={4} borderRadius="lg" borderWidth="1px" _hover={{ borderColor: 'brand.400' }}>
-                <Flex justify="space-between" align="center">
+            <Flex
+              key={setlist.id}
+              bg="white"
+              borderRadius="lg"
+              borderWidth="1px"
+              _hover={{ borderColor: 'brand.400' }}
+              align="center"
+              gap={3}
+            >
+              {/* The link fills the row; Archive sits beside it rather than
+                  inside it, so pressing Archive never also opens the setlist. */}
+              <Link to={`/setlists/${setlist.id}`} style={{ flex: 1, minWidth: 0 }}>
+                <Flex justify="space-between" align="center" gap={3} p={4}>
                   <Text fontWeight="semibold">{setlist.name}</Text>
-                  {setlist.serviceDate && (
-                    <Text fontSize="sm" color="gray.600">
-                      {dayjs(setlist.serviceDate).format('D MMM YYYY')}
-                    </Text>
-                  )}
+                  {/* A setlist without a service date is dated by its last
+                      edit — a list with blank rows is harder to scan than one
+                      with a slightly weaker date. */}
+                  <Text fontSize="sm" color={setlist.serviceDate ? 'gray.600' : 'gray.400'} flexShrink={0}>
+                    {setlist.serviceDate
+                      ? dayjs(setlist.serviceDate).format('D MMM YYYY')
+                      : `Updated ${dayjs(setlist.updatedAt).format('D MMM YYYY')}`}
+                  </Text>
                 </Flex>
-              </Box>
-            </Link>
+              </Link>
+              {canEdit(user) && (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  color="gray.500"
+                  mr={3}
+                  onClick={() => archive(setlist)}
+                  title="Archive this setlist"
+                  aria-label="Archive this setlist"
+                >
+                  <Archive size={14} />
+                </Button>
+              )}
+            </Flex>
           ))}
         </Stack>
       )}

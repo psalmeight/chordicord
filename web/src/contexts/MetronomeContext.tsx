@@ -15,6 +15,8 @@ interface Stored {
 interface MetronomeContextValue {
   bpm: number;
   setBpm: (n: number) => void;
+  /** Nudge from the current tempo — safe from a hold-to-repeat timer. */
+  stepBpm: (delta: number) => void;
   beatsPerBar: number;
   setBeatsPerBar: (n: number) => void;
   playing: boolean;
@@ -28,6 +30,11 @@ interface MetronomeContextValue {
   /** Set the tempo, reveal the widget, and start it — for a page's "use this
    *  song's tempo" button. */
   playAt: (bpm: number, beatsPerBar?: number) => void;
+  /** True while a song editor is on screen. The metronome button hides (and
+   *  stops, so nothing keeps clicking with no way to reach it) and the chart
+   *  guide's button moves up out of the editor's action bar. */
+  editing: boolean;
+  setEditing: (v: boolean) => void;
 }
 
 const MetronomeContext = createContext<MetronomeContextValue | null>(null);
@@ -52,8 +59,15 @@ export function MetronomeProvider({ children }: { children: ReactNode }) {
   const [bpm, setBpmState] = useState(initial.bpm);
   const [beatsPerBar, setBeatsPerBar] = useState(initial.beatsPerBar);
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   const engine = useMetronomeEngine(bpm, beatsPerBar);
+
+  // Hidden means unreachable, so a running metronome stops with the button.
+  const { playing, stop } = engine;
+  useEffect(() => {
+    if (editing && playing) stop();
+  }, [editing, playing, stop]);
 
   useEffect(() => {
     try {
@@ -64,6 +78,7 @@ export function MetronomeProvider({ children }: { children: ReactNode }) {
   }, [bpm, beatsPerBar]);
 
   const setBpm = useCallback((n: number) => setBpmState(clampBpm(n)), []);
+  const stepBpm = useCallback((delta: number) => setBpmState((b) => clampBpm(b + delta)), []);
 
   const playAt = useCallback(
     (nextBpm: number, nextBeats?: number) => {
@@ -78,6 +93,7 @@ export function MetronomeProvider({ children }: { children: ReactNode }) {
   const value: MetronomeContextValue = {
     bpm,
     setBpm,
+    stepBpm,
     beatsPerBar,
     setBeatsPerBar,
     playing: engine.playing,
@@ -89,6 +105,8 @@ export function MetronomeProvider({ children }: { children: ReactNode }) {
     open,
     setOpen,
     playAt,
+    editing,
+    setEditing,
   };
 
   return (

@@ -1,7 +1,8 @@
 :root {
   /* Theme colours, matching the FCF Tagbilaran site. The Chakra tokens in
      lib/system.ts carry the same values; these exist for the handful of plain
-     <select>/<input> elements that style themselves outside Chakra. */
+     elements (the chart textarea, the guide) that style themselves outside
+     Chakra. */
   --bg: #f8f6f2;
   --paper: #fdfcfa;
   --ink: #141a22;

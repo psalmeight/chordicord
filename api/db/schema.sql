@@ -50,10 +50,18 @@ CREATE TABLE IF NOT EXISTS "songs" (
 	"content" text NOT NULL DEFAULT '',
 	-- How many columns the chart renders in (1 or 2).
 	"chart_columns" smallint NOT NULL DEFAULT 1,
+	-- The "v2" chart: plain chords-over-lyrics text shown exactly as typed.
+	-- Lives beside `content`, never replaces it; '' until first saved in the
+	-- new editor (the client derives a draft from `content` until then).
+	"content_v2" text NOT NULL DEFAULT '',
 	"created_by" uuid REFERENCES "users"("id") ON DELETE SET NULL,
 	"updated_by" uuid REFERENCES "users"("id") ON DELETE SET NULL,
 	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL
+	"updated_at" timestamp DEFAULT now() NOT NULL,
+	-- Soft delete. NULL means live; set means the song is hidden from the
+	-- songbank lists and the tag index but still loads by id (setlist items
+	-- keep their audio link). Only the archive page restores or hard-deletes.
+	"archived_at" timestamp
 );
 
 CREATE INDEX IF NOT EXISTS "songs_title_idx" ON "songs" ("title");
@@ -65,7 +73,9 @@ CREATE TABLE IF NOT EXISTS "setlists" (
 	"notes" text NOT NULL DEFAULT '',
 	"created_by" uuid REFERENCES "users"("id") ON DELETE SET NULL,
 	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL
+	"updated_at" timestamp DEFAULT now() NOT NULL,
+	-- Soft delete, same semantics as songs.archived_at.
+	"archived_at" timestamp
 );
 
 -- A setlist item owns a snapshot copy of the song taken when it was added.
@@ -93,7 +103,9 @@ CREATE TABLE IF NOT EXISTS "setlist_items" (
 	"feel" varchar(64) NOT NULL DEFAULT '',
 	"content" text NOT NULL DEFAULT '',
 	"note_cards" jsonb NOT NULL DEFAULT '[]'::jsonb,
-	"chart_columns" smallint NOT NULL DEFAULT 1
+	"chart_columns" smallint NOT NULL DEFAULT 1,
+	-- Snapshot of songs.content_v2 (see there), taken at add-time and on resync.
+	"content_v2" text NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS "setlist_items_setlist_idx" ON "setlist_items" ("setlist_id", "position");

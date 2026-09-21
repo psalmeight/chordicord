@@ -1,15 +1,22 @@
 import { Box, Button, Container, Flex, HStack, Text } from '@chakra-ui/react';
-import { ListMusic, LogOut, Music, Users as UsersIcon } from 'lucide-react';
+import { Archive, ListMusic, LogOut, Music, Users as UsersIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useApp } from '@/contexts/AppContext';
+import { canEdit } from '@/lib/auth';
 import { MetronomeProvider } from '@/contexts/MetronomeContext';
 import ChartSyntaxGuide from '@/components/ChartSyntaxGuide';
-import { FONTS } from '@/lib/fonts';
+import DisplaySettings from '@/components/DisplaySettings';
+import ChartV2Guide from '@/components/ChartV2Guide';
+import { Toaster } from '@/components/Toaster';
+import { useEditorV2 } from '@/lib/useEditorV2';
+import { AUTOSCROLL_CONTENT_ID } from '@/lib/useAutoScroll';
 
 export default function Layout({ children }: { children: ReactNode }) {
-  const { user, logout, font, setFont } = useApp();
+  const { user, logout } = useApp();
   const { pathname } = useLocation();
+  // Which chart format the guide in the corner should describe.
+  const [v2] = useEditorV2();
 
   /* The header runs on the site's dark navy, so nav buttons carry their own
      light-on-dark colours rather than the default fg-on-paper ones. */
@@ -50,32 +57,13 @@ export default function Layout({ children }: { children: ReactNode }) {
               </Link>
               {navItem('/', 'Songs', <Music size={16} />, pathname === '/' || pathname.startsWith('/songs'))}
               {navItem('/setlists', 'Setlists', <ListMusic size={16} />, pathname.startsWith('/setlists'))}
+              {canEdit(user) &&
+                navItem('/archive', 'Archive', <Archive size={16} />, pathname.startsWith('/archive'))}
               {user?.role === 'admin' &&
                 navItem('/users', 'Team', <UsersIcon size={16} />, pathname.startsWith('/users'))}
             </HStack>
 
             <HStack gap={3}>
-              <select
-                value={font.id}
-                onChange={(e) => setFont(e.target.value)}
-                aria-label="Chart font"
-                title="Font used for chord charts"
-                style={{
-                  padding: '5px 8px',
-                  borderRadius: 6,
-                  border: '1px solid rgba(248, 246, 242, 0.28)',
-                  background: 'transparent',
-                  color: 'var(--bg)',
-                  fontSize: 13,
-                  fontFamily: 'inherit',
-                }}
-              >
-                {FONTS.map((f) => (
-                  <option key={f.id} value={f.id} style={{ color: 'var(--ink)' }}>
-                    {f.label}
-                  </option>
-                ))}
-              </select>
               <Text
                 fontSize="sm"
                 color="rgba(248, 246, 242, 0.72)"
@@ -83,6 +71,8 @@ export default function Layout({ children }: { children: ReactNode }) {
               >
                 {user?.name}
               </Text>
+              {/* Chart format, size and font — one popover, every chart. */}
+              <DisplaySettings />
               <Button
                 size="sm"
                 variant="ghost"
@@ -98,13 +88,16 @@ export default function Layout({ children }: { children: ReactNode }) {
         </Container>
       </Box>
 
-      <Container maxW="6xl" py={6}>
+      {/* Auto-scroll nudges this wrapper by a sub-pixel translate while it
+          runs; the floating widgets sit outside it so they stay fixed. */}
+      <Container maxW="6xl" py={6} id={AUTOSCROLL_CONTENT_ID}>
         {children}
       </Container>
 
-      {/* Mounted app-wide, beside the metronome: the format is worth looking up
-          while reading a chart someone else wrote, not only while writing one. */}
-      <ChartSyntaxGuide />
+      {/* The chart-writing guide, for whichever format this device is using.
+          Mounted app-wide but shows itself only while a song is being edited. */}
+      {v2 ? <ChartV2Guide /> : <ChartSyntaxGuide />}
+      <Toaster />
     </Box>
     </MetronomeProvider>
   );

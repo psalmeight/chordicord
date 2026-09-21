@@ -1,9 +1,10 @@
 import {
-  Badge, Box, Button, Flex, HStack, Heading, Input, Spinner, Stack, Text, Textarea,
+  Badge, Box, Button, Dialog, Flex, HStack, Heading, Input, Popover, Portal, Spinner, Stack, Text,
+  Textarea,
 } from '@chakra-ui/react';
 import {
-  ArrowLeft, ChevronDown, ChevronUp, Columns2, EyeOff, FileDown, Music2, Pencil, Plus, Printer,
-  RefreshCw, StickyNote, Trash2, X,
+  Archive, ArrowLeft, ChevronDown, ChevronUp, Columns2, Eye, EyeOff, FileDown, Library, Music2,
+  Pencil, Plus, Printer, RefreshCw, StickyNote, X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -13,16 +14,25 @@ import { canEdit } from '@/lib/auth';
 import { capoKey, keyOptions, semitonesBetween } from '@/lib/chords';
 import { groupNotes } from '@/lib/noteColors';
 import type { Cover, PdfSong } from '@/lib/pdf';
+import { useChartFontSize } from '@/lib/useChartFontSize';
+import { useEditorV2 } from '@/lib/useEditorV2';
+import { toV2Draft } from '@/lib/v2draft';
 import { useApp } from '@/contexts/AppContext';
+import ArchivedBanner from '@/components/ArchivedBanner';
 import AudioPlayer from '@/components/AudioPlayer';
 import AutoScrollWidget from '@/components/AutoScrollWidget';
+import ChartV2 from '@/components/ChartV2';
 import ChordChart from '@/components/ChordChart';
+import { CAPO_OPTIONS, Select } from '@/components/FormControls';
 import { NoteCardList } from '@/components/NoteCardView';
+import { OptionButton, OptionDivider, OptionsMenu, OptionRow } from '@/components/OptionsMenu';
+import SongForm from '@/components/SongForm';
+import SyncConfirmDialog from '@/components/SyncConfirmDialog';
 import type { Setlist, SetlistItem, Song } from '@/types';
 
 /** A setlist row as the PDF renderer wants it — printed in the service key,
  *  not the key the chart was written in. */
-const toPdfSong = (item: SetlistItem): PdfSong => ({
+const toPdfSong = (item: SetlistItem, showChords: boolean): PdfSong => ({
   title: item.title,
   artist: item.artist,
   fromKey: item.key ?? '',
@@ -33,6 +43,7 @@ const toPdfSong = (item: SetlistItem): PdfSong => ({
   content: item.content,
   noteCards: item.noteCards,
   columns: item.chartColumns,
+  showChords,
 });
 
 export default function SetlistView() {
@@ -56,6 +67,19 @@ export default function SetlistView() {
   const [editForm, setEditForm] = useState({ name: '', serviceDate: '', notes: '' });
   const [savingSetlist, setSavingSetlist] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+  // Set once for every chart, from the header — see useChartFontSize.
+  const [fontSize] = useChartFontSize();
+  // The v2 chart, app-wide from the header — see ChartV2.
+  const [v2] = useEditorV2();
+  // Lyrics only, for the whole setlist — singers' view. Local to this screen
+  // and never saved; the PDF and print follow it so what prints is what's seen.
+  const [showChords, setShowChords] = useState(true);
+  // The setlist item whose songbank song is open in the edit modal — a
+  // leader fixes the chart at its source without leaving the service.
+  const [songbankEdit, setSongbankEdit] = useState<SetlistItem | null>(null);
+  // The item a resync is being confirmed for, and whether the prompt follows
+  // a songbank edit made from this page (which only changes the framing).
+  const [syncPrompt, setSyncPrompt] = useState<{ item: SetlistItem; afterSave: boolean } | null>(null);
 
   const load = () =>
     api
@@ -143,20 +167,31 @@ export default function SetlistView() {
     if (target && target.key !== current) setKey(item, target.key);
   };
 
-  const resync = async (item: SetlistItem) => {
-    if (
-      !window.confirm(
-        `Update "${item.title}" from the songbank? This replaces this setlist's edits to the ` +
-          `chart, notes and key with the songbank version. Capo settings and the track tune are kept.`,
-      )
-    )
-      return;
+  const resyncNow = async (item: SetlistItem) => {
     try {
       await api.post(`/api/setlists/${id}/items/${item.id}/resync`);
       load();
     } catch (err) {
       setError(apiError(err, 'Could not update from the songbank'));
     }
+  };
+
+  // The Sync button: the warning first (SyncConfirmDialog), then resyncNow.
+  const resync = (item: SetlistItem) => setSyncPrompt({ item, afterSave: false });
+
+  // After a songbank edit made from this page, the obvious next step is to
+  // pull it into the setlist — but it's offered, not assumed, because the
+  // copy may carry deliberate per-service edits the resync would erase.
+  const songbankSaved = () => {
+    const item = songbankEdit;
+    setSongbankEdit(null);
+    if (item) setSyncPrompt({ item, afterSave: true });
+  };
+
+  const confirmSync = async () => {
+    const prompt = syncPrompt;
+    setSyncPrompt(null);
+    if (prompt) await resyncNow(prompt.item);
   };
 
   const move = async (index: number, delta: number) => {
@@ -191,7 +226,7 @@ export default function SetlistView() {
     setPdfBusy(true);
     try {
       const pdf = await import('@/lib/pdf');
-      const songs = items.map(toPdfSong);
+      const songs = items.map((item) => toPdfSong(item, showChords));
       if (action === 'save') pdf.downloadSetlistPdf(cover(), songs);
       else pdf.printSetlistPdf(cover(), songs);
     } catch (err) {
@@ -206,7 +241,7 @@ export default function SetlistView() {
   // whole-setlist PDF above stays capo-free: it's the shared team artifact.
   const downloadItemPdf = async (item: SetlistItem) => {
     const { downloadSongPdf } = await import('@/lib/pdf');
-    const base = toPdfSong(item);
+    const base = toPdfSong(item, showChords);
     if (item.myCapo > 0 && base.toKey) {
       downloadSongPdf({
         ...base,
@@ -260,13 +295,25 @@ export default function SetlistView() {
     }
   };
 
-  const deleteSetlist = async () => {
-    if (!window.confirm(`Delete "${setlist!.name}"? This removes the setlist, not the songs.`)) return;
+  // Archiving is the only "remove" this page offers: the setlist leaves the
+  // list but keeps every item and everyone's prefs. Restore and permanent
+  // delete both live on the Archive page.
+  const archiveSetlist = async () => {
+    if (!window.confirm(`Archive "${setlist!.name}"? It leaves the list but can be restored from the Archive page.`)) return;
     try {
-      await api.delete(`/api/setlists/${id}`);
+      await api.post(`/api/setlists/${id}/archive`);
       navigate('/setlists', { replace: true });
     } catch (err) {
-      setError(apiError(err, 'Could not delete setlist'));
+      setError(apiError(err, 'Could not archive setlist'));
+    }
+  };
+
+  const restoreSetlist = async () => {
+    try {
+      const { data } = await api.post<Setlist>(`/api/setlists/${id}/restore`);
+      setSetlist(data);
+    } catch (err) {
+      setError(apiError(err, 'Could not restore setlist'));
     }
   };
 
@@ -282,7 +329,18 @@ export default function SetlistView() {
             <Text ml={1}>Setlists</Text>
           </Button>
         </Link>
-        <HStack gap={2}>
+        <HStack gap={2} wrap="wrap">
+          {items.length > 0 && (
+            <Button
+              size="sm"
+              variant={showChords ? 'outline' : 'subtle'}
+              onClick={() => setShowChords((v) => !v)}
+              title={showChords ? 'Show the lyrics alone, for every song' : 'Show the chords again'}
+            >
+              {showChords ? <EyeOff size={16} /> : <Eye size={16} />}
+              <Text ml={1}>{showChords ? 'Hide chords' : 'Show chords'}</Text>
+            </Button>
+          )}
           <Button
             size="sm"
             variant="outline"
@@ -318,6 +376,14 @@ export default function SetlistView() {
           )}
         </HStack>
       </Flex>
+
+      {setlist.archivedAt && (
+        <ArchivedBanner
+          what="setlist"
+          archivedAt={setlist.archivedAt}
+          onRestore={editable ? restoreSetlist : undefined}
+        />
+      )}
 
       <Box>
         <Heading size="xl">{setlist.name}</Heading>
@@ -355,9 +421,9 @@ export default function SetlistView() {
               rows={2}
             />
             <Flex justify="space-between" wrap="wrap" gap={2}>
-              <Button size="sm" variant="outline" colorPalette="red" onClick={deleteSetlist}>
-                <Trash2 size={16} />
-                <Text ml={1}>Delete setlist</Text>
+              <Button size="sm" variant="outline" onClick={archiveSetlist} title="Archive this setlist">
+                <Archive size={16} />
+                <Text ml={1}>Archive setlist</Text>
               </Button>
               <HStack gap={2}>
                 <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
@@ -414,97 +480,106 @@ export default function SetlistView() {
               <Box key={item.id} bg="white" p={5} borderRadius="lg" borderWidth="1px">
                 <Flex justify="space-between" align="start" gap={3} wrap="wrap">
                   <Box>
-                    <HStack gap={2}>
+                    {/* Title | key | time signature on one line: the three
+                        things a player checks before the count-in. The key
+                        select itself is in the options popover. */}
+                    <HStack gap={2} wrap="wrap" fontSize="lg">
                       <Text color="gray.400" fontWeight="bold">
                         {index + 1}
                       </Text>
                       {item.songId ? (
                         <Link to={`/songs/${item.songId}`}>
-                          <Text fontWeight="semibold" fontSize="lg">
-                            {item.title}
-                          </Text>
+                          <Text fontWeight="bold">{item.title}</Text>
                         </Link>
                       ) : (
-                        <>
-                          <Text fontWeight="semibold" fontSize="lg">
-                            {item.title}
-                          </Text>
-                          <Badge colorPalette="gray" variant="outline" title="The songbank song was deleted; this setlist keeps its own copy">
-                            removed from songbank
+                        <Text fontWeight="bold">{item.title}</Text>
+                      )}
+                      <Text color="gray.300" aria-hidden>|</Text>
+                      {displayKey ? (
+                        <Text fontWeight="semibold" color="brand.600">{displayKey}</Text>
+                      ) : (
+                        <Text color="gray.400">No key</Text>
+                      )}
+                      <Text color="gray.300" aria-hidden>|</Text>
+                      <Text color="gray.700">{item.timeSignature}</Text>
+                      {!item.songId && (
+                        <Badge colorPalette="gray" variant="outline" title="The songbank song was deleted; this setlist keeps its own copy">
+                          removed from songbank
+                        </Badge>
+                      )}
+                    </HStack>
+                    {(item.myCapo > 0 && displayKey) || item.tempo || item.feel ||
+                    (item.keyOverride && item.keyOverride !== item.key) ? (
+                      <HStack gap={3} fontSize="sm" color="gray.600" mt={1} ml={6} wrap="wrap">
+                        {item.myCapo > 0 && displayKey && (
+                          <Badge colorPalette="yellow" title="Your capo — only you see it">
+                            Capo {item.myCapo}
                           </Badge>
-                        </>
-                      )}
-                    </HStack>
-                    <HStack gap={3} fontSize="sm" color="gray.600" mt={1} ml={6}>
-                      <Text>{item.timeSignature}</Text>
-                      {item.tempo && <Text>{item.tempo} bpm</Text>}
-                      {item.feel && <Text>{item.feel}</Text>}
-                      {item.keyOverride && item.keyOverride !== item.key && (
-                        <Badge colorPalette="orange">from {item.key}</Badge>
-                      )}
-                    </HStack>
+                        )}
+                        {item.tempo && <Text>{item.tempo} bpm</Text>}
+                        {item.feel && <Text>{item.feel}</Text>}
+                        {item.keyOverride && item.keyOverride !== item.key && (
+                          <Badge colorPalette="orange">from {item.key}</Badge>
+                        )}
+                      </HStack>
+                    ) : null}
                   </Box>
 
-                  <HStack gap={2} className="no-print" wrap="wrap">
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      onClick={() => downloadItemPdf(item)}
-                      title={`Download "${item.title}" as a PDF, in this setlist's key`}
-                    >
-                      <FileDown size={14} />
-                    </Button>
-                    <Button
-                      size="xs"
-                      variant={openNotes[item.id] || item.myNotes.trim() ? 'subtle' : 'outline'}
-                      onClick={() => toggleMyNotes(item)}
-                      title="Your private note — only you see it"
-                    >
-                      <StickyNote size={14} />
-                    </Button>
-                    {item.key ? (
-                      <select
-                        value={displayKey}
-                        onChange={(e) => setKey(item, e.target.value)}
-                        disabled={!editable}
-                        style={{
-                          padding: '6px 10px',
-                          borderRadius: 6,
-                          border: '1px solid var(--line-2)',
-                          fontWeight: 600,
-                        }}
+                  <HStack gap={2} className="no-print">
+                    {/* Sync stays out on the row: it's the one action a leader
+                        reaches for after fixing a chart in the songbank, and it
+                        shouldn't hide behind a menu. */}
+                    {editable && item.songId && (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        onClick={() => resync(item)}
+                        title="Update this copy from the songbank"
                       >
-                        {keyOptions(item.key).map((opt) => (
-                          <option key={opt.key} value={opt.key}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <Badge colorPalette="gray" variant="outline">No key</Badge>
+                        <RefreshCw size={14} />
+                        <Text ml={1}>Sync</Text>
+                      </Button>
                     )}
-                    {/* Capo is per-account, so every role gets the control. */}
-                    {item.key && (
-                      <select
-                        value={item.myCapo}
-                        onChange={(e) => saveCapo(item, Number(e.target.value))}
-                        title="Your capo — saved to your account, invisible to others"
-                        style={{
-                          padding: '6px 10px',
-                          borderRadius: 6,
-                          border: '1px solid var(--line-2)',
-                        }}
-                      >
-                        <option value={0}>No capo</option>
-                        {Array.from({ length: 11 }, (_, i) => i + 1).map((n) => (
-                          <option key={n} value={n}>
-                            Capo {n}
-                          </option>
-                        ))}
-                      </select>
+                    {/* Two things "edit" can mean here, so the button asks:
+                        this setlist's own copy (its page), or the songbank
+                        song itself (a modal, so the service stays open). */}
+                    {editable && (
+                      <Popover.Root lazyMount unmountOnExit positioning={{ placement: 'bottom-end' }}>
+                        <Popover.Trigger asChild>
+                          <Button size="xs" variant="outline">
+                            <Pencil size={14} />
+                            <Text ml={1}>Edit</Text>
+                          </Button>
+                        </Popover.Trigger>
+                        <Portal>
+                          <Popover.Positioner>
+                            <Popover.Content w="240px">
+                              <Popover.Arrow />
+                              <Popover.Body p={2}>
+                                <Stack gap={1}>
+                                  <Link to={`/setlists/${id}/items/${item.id}/edit`}>
+                                    <OptionButton icon={<Pencil size={16} />}>Edit this copy</OptionButton>
+                                  </Link>
+                                  {item.songId && (
+                                    <Popover.CloseTrigger asChild>
+                                      <OptionButton
+                                        icon={<Library size={16} />}
+                                        onClick={() => setSongbankEdit(item)}
+                                      >
+                                        Edit from songbank
+                                      </OptionButton>
+                                    </Popover.CloseTrigger>
+                                  )}
+                                </Stack>
+                              </Popover.Body>
+                            </Popover.Content>
+                          </Popover.Positioner>
+                        </Portal>
+                      </Popover.Root>
                     )}
-                    {/* Only worth offering where there's a chart to lay out. */}
-                    {editable && item.content.trim() && (
+                    {/* Saved to this setlist's copy. Only where there's a
+                        chart to lay out. */}
+                    {editable && (v2 ? item.contentV2 || item.content : item.content).trim() && (
                       <Button
                         size="xs"
                         variant={item.chartColumns === 2 ? 'subtle' : 'outline'}
@@ -515,45 +590,79 @@ export default function SetlistView() {
                             ? 'Two columns — click for one. Narrow screens show one either way.'
                             : 'One column — click to split the chart into two side by side.'
                         }
-                        aria-label={
-                          item.chartColumns === 2 ? 'Switch to one column' : 'Switch to two columns'
-                        }
                       >
                         <Columns2 size={14} />
+                        <Text ml={1}>{item.chartColumns === 2 ? '2 columns' : '1 column'}</Text>
                       </Button>
                     )}
-                    {editable && (
-                      <>
-                        <Link to={`/setlists/${id}/items/${item.id}/edit`}>
-                          <Button
-                            size="xs"
-                            variant="outline"
-                            title="Edit this setlist's copy — the songbank song is untouched"
+                    {/* Everything else that used to be a row of icon buttons,
+                        behind one labelled button — a song shows its chart, not
+                        a toolbar. Selects and Move keep the popover open; the
+                        one-shot actions close it. */}
+                    <OptionsMenu>
+                      {item.key ? (
+                        <>
+                          <OptionRow label="Key">
+                            <Select
+                              value={displayKey}
+                              onChange={(v) => setKey(item, v)}
+                              options={keyOptions(item.key).map((opt) => ({ value: opt.key, label: opt.label }))}
+                              disabled={!editable}
+                              size="sm"
+                              triggerProps={{ fontWeight: 'semibold' }}
+                            />
+                          </OptionRow>
+                          {/* Capo is per-account, so every role gets the control. */}
+                          <OptionRow label="Capo" hint="Only you see this">
+                            <Select
+                              value={String(item.myCapo)}
+                              onChange={(v) => saveCapo(item, Number(v))}
+                              options={CAPO_OPTIONS.map((o) => ({
+                                value: o.value,
+                                label: o.value === '0' ? 'No capo' : `Capo ${o.value}`,
+                              }))}
+                              size="sm"
+                            />
+                          </OptionRow>
+                          <OptionDivider />
+                        </>
+                      ) : null}
+
+                      <Popover.CloseTrigger asChild>
+                        <OptionButton icon={<FileDown size={16} />} onClick={() => downloadItemPdf(item)}>
+                          Download PDF
+                        </OptionButton>
+                      </Popover.CloseTrigger>
+                      <Popover.CloseTrigger asChild>
+                        <OptionButton icon={<StickyNote size={16} />} onClick={() => toggleMyNotes(item)}>
+                          {openNotes[item.id] ? 'Hide private note' : 'Private note'}
+                        </OptionButton>
+                      </Popover.CloseTrigger>
+
+                      {editable && (
+                        <>
+                          <OptionDivider />
+                          <OptionButton
+                            icon={<ChevronUp size={16} />}
+                            onClick={() => move(index, -1)}
+                            disabled={index === 0}
                           >
-                            <Pencil size={14} />
-                          </Button>
-                        </Link>
-                        {item.songId && (
-                          <Button
-                            size="xs"
-                            variant="outline"
-                            onClick={() => resync(item)}
-                            title="Update this copy from the songbank"
+                            Move up
+                          </OptionButton>
+                          <OptionButton
+                            icon={<ChevronDown size={16} />}
+                            onClick={() => move(index, 1)}
+                            disabled={index === items.length - 1}
                           >
-                            <RefreshCw size={14} />
-                          </Button>
-                        )}
-                        <Button size="xs" variant="outline" onClick={() => move(index, -1)}>
-                          <ChevronUp size={14} />
-                        </Button>
-                        <Button size="xs" variant="outline" onClick={() => move(index, 1)}>
-                          <ChevronDown size={14} />
-                        </Button>
-                        <Button size="xs" variant="ghost" colorPalette="red" onClick={() => remove(item.id)}>
-                          <X size={14} />
-                        </Button>
-                      </>
-                    )}
+                            Move down
+                          </OptionButton>
+                          <OptionDivider />
+                          <OptionButton icon={<X size={16} />} onClick={() => remove(item.id)} danger>
+                            Remove from setlist
+                          </OptionButton>
+                        </>
+                      )}
+                    </OptionsMenu>
                   </HStack>
                 </Flex>
 
@@ -643,25 +752,104 @@ export default function SetlistView() {
                   </Box>
                 )}
 
-                {(item.content.trim() || notes.general.length > 0) && (
+                {v2 ? (
+                  /* The v2 chart, from the item's own snapshot — or, until it
+                     has one, a draft laid out from the classic copy. Edited
+                     through the item's Edit button like everything else. */
                   <Box mt={4} pt={4} borderTopWidth="1px">
-                    <NoteCardList cards={notes.general} />
-                    <Box mt={notes.general.length ? 3 : 0}>
-                      <ChordChart
-                        content={item.content}
-                        fromKey={item.key ?? ''}
-                        toKey={chartKey}
-                        sectionNotes={notes.bySection}
-                        columns={item.chartColumns}
-                      />
-                    </Box>
+                    <ChartV2
+                      value={item.contentV2 || toV2Draft(item.content)}
+                      fromKey={item.key ?? ''}
+                      toKey={chartKey}
+                      fontSize={fontSize}
+                      showChords={showChords}
+                      columns={item.chartColumns}
+                    />
                   </Box>
+                ) : (
+                  (item.content.trim() || notes.general.length > 0) && (
+                    <Box mt={4} pt={4} borderTopWidth="1px">
+                      <NoteCardList cards={notes.general} />
+                      <Box mt={notes.general.length ? 3 : 0}>
+                        <ChordChart
+                          content={item.content}
+                          fromKey={item.key ?? ''}
+                          toKey={chartKey}
+                          fontSize={fontSize}
+                          showChords={showChords}
+                          sectionNotes={notes.bySection}
+                          columns={item.chartColumns}
+                        />
+                      </Box>
+                    </Box>
+                  )
                 )}
               </Box>
             );
           })}
         </Stack>
       )}
+
+      {/* Edit-from-songbank. Full-cover with its own scroll: the editor is a
+          page's worth of form and chart panels. Closing without saving just
+          drops the draft; saving offers a resync (songbankSaved). */}
+      <Dialog.Root
+        open={songbankEdit !== null}
+        onOpenChange={(e) => !e.open && setSongbankEdit(null)}
+        size="cover"
+        scrollBehavior="inside"
+        lazyMount
+        unmountOnExit
+      >
+        <Portal>
+          <Dialog.Backdrop />
+          <Dialog.Positioner>
+            <Dialog.Content bg="gray.50">
+              <Dialog.Header>
+                {/* Stacked: the header slot lays its children out in a row,
+                    which would put the description beside the title. */}
+                <Stack gap={0.5}>
+                  <Dialog.Title>Edit in songbank</Dialog.Title>
+                  <Dialog.Description fontSize="sm" color="gray.600">
+                    This is the songbank song. This setlist keeps its own copy until you update it.
+                  </Dialog.Description>
+                </Stack>
+                <Dialog.CloseTrigger asChild>
+                  <Button size="xs" variant="ghost" aria-label="Close">
+                    <X size={16} />
+                  </Button>
+                </Dialog.CloseTrigger>
+              </Dialog.Header>
+              <Dialog.Body>
+                {songbankEdit?.songId && (
+                  <SongForm
+                    songId={songbankEdit.songId}
+                    leading={
+                      <Button size="sm" variant="ghost" onClick={() => setSongbankEdit(null)}>
+                        <ArrowLeft size={16} />
+                        <Text ml={1}>Back</Text>
+                      </Button>
+                    }
+                    onSaved={songbankSaved}
+                    inModal
+                    onArchived={() => {
+                      setSongbankEdit(null);
+                      load();
+                    }}
+                  />
+                )}
+              </Dialog.Body>
+            </Dialog.Content>
+          </Dialog.Positioner>
+        </Portal>
+      </Dialog.Root>
+
+      <SyncConfirmDialog
+        title={syncPrompt?.item.title ?? null}
+        afterSave={syncPrompt?.afterSave}
+        onConfirm={confirmSync}
+        onClose={() => setSyncPrompt(null)}
+      />
 
       {items.length > 0 && <AutoScrollWidget />}
     </Stack>

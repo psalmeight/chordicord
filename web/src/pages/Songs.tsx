@@ -1,5 +1,5 @@
 import { Badge, Box, Button, Flex, HStack, Heading, Input, Spinner, Stack, Text } from '@chakra-ui/react';
-import { Music2, Plus, Search } from 'lucide-react';
+import { Archive, Music2, Plus, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api, { apiError } from '@/lib/api';
@@ -34,6 +34,18 @@ export default function Songs() {
   useEffect(() => {
     api.get<string[]>('/api/songs/tags').then(({ data }) => setTags(data)).catch(() => {});
   }, []);
+
+  // Soft delete, same as the editor's own Archive: restore or delete for
+  // good from the Archive page. The row goes without a reload.
+  const archive = async (song: Song) => {
+    if (!window.confirm(`Archive "${song.title}"? It leaves the songbank but can be restored from the Archive page.`)) return;
+    try {
+      await api.post(`/api/songs/${song.id}/archive`);
+      setSongs((prev) => prev.filter((s) => s.id !== song.id));
+    } catch (err) {
+      setError(apiError(err, 'Could not archive song'));
+    }
+  };
 
   return (
     <Stack gap={5}>
@@ -107,15 +119,19 @@ export default function Songs() {
       ) : (
         <Stack gap={2}>
           {songs.map((song) => (
-            <Link key={song.id} to={`/songs/${song.id}`}>
-              <Box
-                bg="white"
-                p={4}
-                borderRadius="lg"
-                borderWidth="1px"
-                _hover={{ borderColor: 'brand.400' }}
-              >
-                <Flex justify="space-between" align="center" gap={4} wrap="wrap">
+            <Flex
+              key={song.id}
+              bg="white"
+              borderRadius="lg"
+              borderWidth="1px"
+              _hover={{ borderColor: 'brand.400' }}
+              align="center"
+              gap={3}
+            >
+              {/* The link fills the row; Archive sits beside it rather than
+                  inside it, so pressing Archive never also opens the song. */}
+              <Link to={`/songs/${song.id}`} style={{ flex: 1, minWidth: 0 }}>
+                <Flex justify="space-between" align="center" gap={4} wrap="wrap" p={4}>
                   <Box>
                     <Text fontWeight="semibold">{song.title}</Text>
                     {song.artist && (
@@ -140,8 +156,21 @@ export default function Songs() {
                     {song.feel && <Text>{song.feel}</Text>}
                   </HStack>
                 </Flex>
-              </Box>
-            </Link>
+              </Link>
+              {canEdit(user) && (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  color="gray.500"
+                  mr={3}
+                  onClick={() => archive(song)}
+                  title="Archive this song"
+                  aria-label="Archive this song"
+                >
+                  <Archive size={14} />
+                </Button>
+              )}
+            </Flex>
           ))}
         </Stack>
       )}

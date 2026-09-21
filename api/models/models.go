@@ -82,11 +82,15 @@ type Song struct {
 	Tags          pq.StringArray `db:"tags" json:"tags"`
 	Content       string         `db:"content" json:"content"`
 	// How many columns the chart renders in (1 or 2).
-	ChartColumns  int            `db:"chart_columns" json:"chartColumns"`
-	CreatedBy     *string        `db:"created_by" json:"createdBy"`
-	UpdatedBy     *string        `db:"updated_by" json:"updatedBy"`
-	CreatedAt     time.Time      `db:"created_at" json:"createdAt"`
-	UpdatedAt     time.Time      `db:"updated_at" json:"updatedAt"`
+	ChartColumns int `db:"chart_columns" json:"chartColumns"`
+	// The v2 plain-text chart; '' until first saved in the new editor.
+	ContentV2 string    `db:"content_v2" json:"contentV2"`
+	CreatedBy *string   `db:"created_by" json:"createdBy"`
+	UpdatedBy *string   `db:"updated_by" json:"updatedBy"`
+	CreatedAt time.Time `db:"created_at" json:"createdAt"`
+	UpdatedAt time.Time `db:"updated_at" json:"updatedAt"`
+	// nil while the song is live; set once it has been archived.
+	ArchivedAt *time.Time `db:"archived_at" json:"archivedAt"`
 }
 
 // SongWithAuthor is the list/detail projection — same as Song plus the
@@ -129,6 +133,8 @@ type Setlist struct {
 	CreatedBy   *string    `db:"created_by" json:"createdBy"`
 	CreatedAt   time.Time  `db:"created_at" json:"createdAt"`
 	UpdatedAt   time.Time  `db:"updated_at" json:"updatedAt"`
+	// nil while the setlist is live; set once it has been archived.
+	ArchivedAt *time.Time `db:"archived_at" json:"archivedAt"`
 }
 
 // SetlistItem owns a snapshot copy of its song, taken when the song was added
@@ -154,6 +160,8 @@ type SetlistItem struct {
 	Content       string    `db:"content" json:"content"`
 	NoteCards     NoteCards `db:"note_cards" json:"noteCards"`
 	ChartColumns  int       `db:"chart_columns" json:"chartColumns"`
+	// The item's snapshot of the v2 chart; '' until copied or saved.
+	ContentV2 string `db:"content_v2" json:"contentV2"`
 	// Joined from song_audio so the setlist view can offer play-along in one
 	// query. AudioTuneOffset is the recording's own saved tune (the fallback).
 	HasAudio        bool `db:"has_audio" json:"hasAudio"`

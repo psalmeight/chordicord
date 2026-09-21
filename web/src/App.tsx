@@ -14,6 +14,7 @@ import Setlists from './pages/Setlists';
 import SetlistView from './pages/SetlistView';
 import SetlistItemEditor from './pages/SetlistItemEditor';
 import Users from './pages/Users';
+import Archive from './pages/Archive';
 
 function Protected({ children, roles }: { children: ReactNode; roles?: Role[] }) {
   const { user, loading } = useApp();
@@ -48,6 +49,9 @@ export default function App() {
       <Route path="/setlists" element={<Protected><Setlists /></Protected>} />
       <Route path="/setlists/:id" element={<Protected><SetlistView /></Protected>} />
       <Route path="/setlists/:id/items/:itemId/edit" element={<Protected roles={['admin', 'leader']}><SetlistItemEditor /></Protected>} />
+
+      {/* Restore and permanent delete live here, so it's editors-only like they are. */}
+      <Route path="/archive" element={<Protected roles={['admin', 'leader']}><Archive /></Protected>} />
 
       <Route path="/users" element={<Protected roles={['admin']}><Users /></Protected>} />
 

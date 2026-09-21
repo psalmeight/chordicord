@@ -59,6 +59,10 @@ func New(database *sqlx.DB, cfg *config.Config) *gin.Engine {
 	songs.GET("/:id", handlers.GetSong(database))
 	songs.POST("", editors, handlers.CreateSong(database))
 	songs.PATCH("/:id", editors, handlers.UpdateSong(database))
+	// Archive is the soft delete; DELETE is permanent and only offered from
+	// the archive page, so a song is always archived before it can be gone.
+	songs.POST("/:id/archive", editors, handlers.SetSongArchived(database, true))
+	songs.POST("/:id/restore", editors, handlers.SetSongArchived(database, false))
 	songs.DELETE("/:id", editors, handlers.DeleteSong(database, store))
 	// Reference tracks. Everyone plays along; only editors attach or remove.
 	// Pitch tuning is saved per setlist item, never on the recording itself.
@@ -76,6 +80,8 @@ func New(database *sqlx.DB, cfg *config.Config) *gin.Engine {
 	setlists.GET("/:id", handlers.GetSetlist(database))
 	setlists.POST("", editors, handlers.CreateSetlist(database))
 	setlists.PATCH("/:id", editors, handlers.UpdateSetlist(database))
+	setlists.POST("/:id/archive", editors, handlers.SetSetlistArchived(database, true))
+	setlists.POST("/:id/restore", editors, handlers.SetSetlistArchived(database, false))
 	setlists.DELETE("/:id", editors, handlers.DeleteSetlist(database))
 	setlists.POST("/:id/items", editors, handlers.AddSetlistItem(database))
 	setlists.PATCH("/:id/items/:itemId", editors, handlers.UpdateSetlistItem(database))
