@@ -3,20 +3,20 @@ package handlers
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
-	"golang.org/x/crypto/bcrypt"
 
-	"transcode/api/config"
 	"transcode/api/middleware"
 	"transcode/api/models"
 )
 
 var validRoles = map[string]bool{"admin": true, "leader": true, "member": true}
 
+// ListUsers is the whole team. There is no "create": people appear here by
+// signing in through Auth0, after which an admin can change their role.
 func ListUsers(database *sqlx.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var users []models.User
 		err := database.Select(&users,
-			`SELECT id, email, username, password_hash, name, role, verified_at, created_at, updated_at
+			`SELECT id, email, username, auth0_sub, name, role, verified_at, created_at, updated_at
 			 FROM users ORDER BY name`)
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Failed to load users"})
@@ -27,96 +27,6 @@ func ListUsers(database *sqlx.DB) gin.HandlerFunc {
 			out = append(out, userPayload(&users[i]))
 		}
 		c.JSON(200, out)
-	}
-}
-
-// CreateUser makes the account with a throwaway password and returns an
-// invite link — the invitee chooses their own password. No email is sent;
-// the admin copies the link.
-func CreateUser(database *sqlx.DB, cfg *config.Config) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var body struct {
-			Email    string `json:"email"`
-			Username string `json:"username"`
-			Name     string `json:"name"`
-			Role     string `json:"role"`
-		}
-		if err := c.ShouldBindJSON(&body); err != nil || body.Email == "" || body.Name == "" {
-			c.JSON(400, gin.H{"error": "Email and name are required"})
-			return
-		}
-		if body.Role == "" {
-			body.Role = "member"
-		}
-		if !validRoles[body.Role] {
-			c.JSON(400, gin.H{"error": "Invalid role"})
-			return
-		}
-		// Omitted means "no username" rather than "the empty username": the
-		// column is nullable and '' would be a value that collides with itself.
-		var username *string
-		if body.Username != "" {
-			u, err := validateUsername(body.Username)
-			if err != nil {
-				c.JSON(400, gin.H{"error": err.Error()})
-				return
-			}
-			username = &u
-		}
-
-		hash, err := bcrypt.GenerateFromPassword([]byte(uuidString()), bcryptCost)
-		if err != nil {
-			c.JSON(500, gin.H{"error": "Internal error"})
-			return
-		}
-
-		var id string
-		err = database.QueryRowx(
-			`INSERT INTO users (email, username, password_hash, name, role)
-			 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-			normalizeEmail(body.Email), username, string(hash), body.Name, body.Role).Scan(&id)
-		if err != nil {
-			// Two columns can now collide, and telling the admin which one
-			// saves them guessing. The username constraint carries the same
-			// name whether the database came from schema.sql or Migrate; the
-			// email one does not, so it's the fallback rather than the test.
-			if name, ok := isUniqueViolation(err); ok && name == "users_username_key" {
-				c.JSON(400, gin.H{"error": "That username is already taken"})
-				return
-			}
-			c.JSON(400, gin.H{"error": "A user with that email already exists"})
-			return
-		}
-
-		token, err := makeInviteToken(id, cfg.JWTSecret, inviteTTL)
-		if err != nil {
-			c.JSON(500, gin.H{"error": "Internal error"})
-			return
-		}
-		c.JSON(201, gin.H{
-			"id":          id,
-			"inviteToken": token,
-			"inviteLink":  inviteLink(cfg.WebURL, token),
-		})
-	}
-}
-
-// ReinviteUser mints a fresh invite link for someone who never set a password
-// or lost the original.
-func ReinviteUser(database *sqlx.DB, cfg *config.Config) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id := c.Param("id")
-		var exists bool
-		if err := database.Get(&exists, `SELECT true FROM users WHERE id = $1`, id); err != nil {
-			c.JSON(404, gin.H{"error": "User not found"})
-			return
-		}
-		token, err := makeInviteToken(id, cfg.JWTSecret, inviteTTL)
-		if err != nil {
-			c.JSON(500, gin.H{"error": "Internal error"})
-			return
-		}
-		c.JSON(200, gin.H{"inviteToken": token, "inviteLink": inviteLink(cfg.WebURL, token)})
 	}
 }
 
@@ -165,7 +75,7 @@ func UpdateUser(database *sqlx.DB) gin.HandlerFunc {
 				username = CASE WHEN $3 THEN NULL ELSE COALESCE($4, username) END,
 				updated_at = NOW()
 			 WHERE id = $5
-			 RETURNING id, email, username, password_hash, name, role, verified_at, created_at, updated_at`,
+			 RETURNING id, email, username, auth0_sub, name, role, verified_at, created_at, updated_at`,
 			body.Name, body.Role, body.ClearUsername, body.Username, id)
 		if err != nil {
 			if name, ok := isUniqueViolation(err); ok && name == "users_username_key" {

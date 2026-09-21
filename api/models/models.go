@@ -58,13 +58,15 @@ type User struct {
 	// Optional alternative sign-in handle, always stored lowercased. nil for
 	// accounts that predate it or never wanted one — it is never derived from
 	// the email, since a guessable handle is worse than none.
-	Username     *string    `db:"username" json:"username"`
-	PasswordHash string     `db:"password_hash" json:"-"`
-	Name         string     `db:"name" json:"name"`
-	Role         string     `db:"role" json:"role"`
-	VerifiedAt   *time.Time `db:"verified_at" json:"verifiedAt"`
-	CreatedAt    time.Time  `db:"created_at" json:"createdAt"`
-	UpdatedAt    time.Time  `db:"updated_at" json:"updatedAt"`
+	Username *string `db:"username" json:"username"`
+	// Auth0 `sub`. nil for an account that predates Auth0 and has not signed
+	// in since; it is linked on that first sign-in by verified email.
+	Auth0Sub   *string    `db:"auth0_sub" json:"-"`
+	Name       string     `db:"name" json:"name"`
+	Role       string     `db:"role" json:"role"`
+	VerifiedAt *time.Time `db:"verified_at" json:"verifiedAt"`
+	CreatedAt  time.Time  `db:"created_at" json:"createdAt"`
+	UpdatedAt  time.Time  `db:"updated_at" json:"updatedAt"`
 }
 
 type Song struct {

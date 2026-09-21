@@ -3,42 +3,37 @@ export type Role = 'admin' | 'leader' | 'member';
 export interface User {
   id: string;
   email: string;
-  /** Optional second sign-in handle; null for accounts that never set one. */
+  /** Optional handle; null for accounts that never set one. */
   username: string | null;
   name: string;
   role: Role;
   verifiedAt: string | null;
+  /** False for an account from before Auth0 whose owner hasn't signed in since. */
+  linked: boolean;
 }
 
-const TOKEN_KEY = 'transcode_token';
-const USER_KEY = 'transcode_user';
+/**
+ * Where the API client gets its bearer token. Auth0's SDK only hands tokens
+ * out through a hook, so the provider registers this once it has one and
+ * the axios interceptor pulls from it per request. Null until then.
+ */
+type TokenProvider = () => Promise<string | undefined>;
 
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+let accessTokenProvider: TokenProvider | null = null;
+
+export function setAccessTokenProvider(fn: TokenProvider | null) {
+  accessTokenProvider = fn;
 }
 
-export function getCachedUser(): User | null {
-  const raw = localStorage.getItem(USER_KEY);
-  if (!raw) return null;
+export async function getAccessToken(): Promise<string | null> {
+  if (!accessTokenProvider) return null;
   try {
-    return JSON.parse(raw) as User;
+    return (await accessTokenProvider()) ?? null;
   } catch {
+    // Consent required, refresh token gone, etc. — the request goes out
+    // unauthenticated and the 401 handler sends them back to sign in.
     return null;
   }
-}
-
-export function setAuth(token: string, user: User) {
-  localStorage.setItem(TOKEN_KEY, token);
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
-}
-
-export function setCachedUser(user: User) {
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
-}
-
-export function clearAuth() {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
 }
 
 /** Leaders and admins can create and edit songs; members are read-only. */

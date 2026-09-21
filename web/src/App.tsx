@@ -5,8 +5,6 @@ import { useApp } from './contexts/AppContext';
 import type { Role } from './lib/auth';
 import Layout from './components/Layout';
 import Login from './pages/Login';
-import Invite from './pages/Invite';
-import SetPassword from './pages/SetPassword';
 import Songs from './pages/Songs';
 import SongView from './pages/SongView';
 import SongEditor from './pages/SongEditor';
@@ -27,8 +25,6 @@ function Protected({ children, roles }: { children: ReactNode; roles?: Role[] })
     );
   }
   if (!user) return <Navigate to="/login" replace />;
-  // A user created by an admin has no password yet — force them through it.
-  if (!user.verifiedAt) return <Navigate to="/set-password" replace />;
   if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
 
   return <Layout>{children}</Layout>;
@@ -38,8 +34,6 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
-      <Route path="/invite/:token" element={<Invite />} />
-      <Route path="/set-password" element={<SetPassword />} />
 
       <Route path="/" element={<Protected><Songs /></Protected>} />
       <Route path="/songs/new" element={<Protected roles={['admin', 'leader']}><SongEditor /></Protected>} />

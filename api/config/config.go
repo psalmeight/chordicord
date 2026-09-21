@@ -11,9 +11,14 @@ import (
 
 type Config struct {
 	DatabaseURL string
-	JWTSecret   string
 	WebURL      string // comma-separated list of allowed CORS origins
 	Port        string
+
+	// Auth0 tenant that issues the access tokens the API accepts. Domain is
+	// the bare host (my-tenant.us.auth0.com); Audience is the API identifier
+	// registered in Auth0, which the web app requests tokens for.
+	Auth0Domain   string
+	Auth0Audience string
 
 	// Supabase Storage, for song reference tracks. Optional — when unset the
 	// audio endpoints report themselves unavailable rather than failing hard,
@@ -30,9 +35,10 @@ func Load() *Config {
 
 	cfg := &Config{
 		DatabaseURL:    os.Getenv("DATABASE_URL"),
-		JWTSecret:      os.Getenv("JWT_SECRET"),
 		WebURL:         os.Getenv("WEB_URL"),
 		Port:           os.Getenv("PORT"),
+		Auth0Domain:    strings.TrimSuffix(strings.TrimPrefix(os.Getenv("AUTH0_DOMAIN"), "https://"), "/"),
+		Auth0Audience:  os.Getenv("AUTH0_AUDIENCE"),
 		SupabaseURL:    strings.TrimRight(os.Getenv("SUPABASE_URL"), "/"),
 		SupabaseKey:    os.Getenv("SUPABASE_SERVICE_KEY"),
 		SupabaseBucket: os.Getenv("SUPABASE_AUDIO_BUCKET"),
@@ -41,8 +47,8 @@ func Load() *Config {
 	if cfg.DatabaseURL == "" {
 		log.Fatal("DATABASE_URL is required")
 	}
-	if cfg.JWTSecret == "" {
-		log.Fatal("JWT_SECRET is required")
+	if cfg.Auth0Domain == "" || cfg.Auth0Audience == "" {
+		log.Fatal("AUTH0_DOMAIN and AUTH0_AUDIENCE are required")
 	}
 	if cfg.WebURL == "" {
 		cfg.WebURL = "http://localhost:5173"

@@ -38,18 +38,14 @@ func New(database *sqlx.DB, cfg *config.Config) *gin.Engine {
 
 	store := storage.New(cfg.SupabaseURL, cfg.SupabaseKey, cfg.SupabaseBucket)
 
-	auth := middleware.RequireAuth(database, cfg.JWTSecret)
+	auth := middleware.RequireAuth(database, cfg.Auth0Domain, cfg.Auth0Audience)
 	adminOnly := middleware.RequireRole("admin")
 	editors := middleware.RequireRole("admin", "leader")
 
-	// Public auth endpoints.
-	r.POST("/api/auth/login", handlers.Login(database, cfg.JWTSecret))
-	r.POST("/api/auth/accept-invite", handlers.AcceptInvite(database, cfg))
-
-	authed := r.Group("/api/auth")
-	authed.Use(auth)
-	authed.GET("/me", handlers.Me())
-	authed.POST("/change-password", handlers.ChangePassword(database))
+	// Sign-in, sign-up and passwords all live at Auth0; the API only ever
+	// sees bearer tokens. /me is the first call after login and is what
+	// creates or links the users row.
+	r.GET("/api/auth/me", auth, handlers.Me())
 
 	// Songs — everyone on the team reads, leaders and admins write.
 	songs := r.Group("/api/songs")
@@ -95,8 +91,6 @@ func New(database *sqlx.DB, cfg *config.Config) *gin.Engine {
 	users := r.Group("/api/users")
 	users.Use(auth, adminOnly)
 	users.GET("", handlers.ListUsers(database))
-	users.POST("", handlers.CreateUser(database, cfg))
-	users.POST("/:id/reinvite", handlers.ReinviteUser(database, cfg))
 	users.PATCH("/:id", handlers.UpdateUser(database))
 	users.DELETE("/:id", handlers.DeleteUser(database))
 

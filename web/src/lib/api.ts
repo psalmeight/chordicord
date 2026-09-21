@@ -1,12 +1,12 @@
 import axios from 'axios';
-import { clearAuth, getToken } from './auth';
+import { getAccessToken } from './auth';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8082',
 });
 
-api.interceptors.request.use((config) => {
-  const token = getToken();
+api.interceptors.request.use(async (config) => {
+  const token = await getAccessToken();
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
@@ -15,11 +15,9 @@ api.interceptors.response.use(
   (res) => res,
   (error) => {
     if (error.response?.status === 401) {
-      clearAuth();
-      // Don't bounce off the login page itself, or off the invite flow —
-      // neither has a valid token yet by definition.
-      const path = window.location.pathname;
-      if (!path.startsWith('/login') && !path.startsWith('/invite')) {
+      // The SDK refreshes tokens on its own, so a 401 means the session is
+      // really gone. Don't bounce off the login page itself.
+      if (!window.location.pathname.startsWith('/login')) {
         window.location.href = '/login';
       }
     }

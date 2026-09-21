@@ -14,10 +14,12 @@ Same shape as `doctrine`:
 
 - **api/** — Go 1.23 + Gin, `sqlx`/`pgx` over Postgres, hand-written SQL, no ORM
 - **web/** — React 19 + Vite 6 + TypeScript + Chakra UI v3
-- **Auth** — HS256 JWT bearer tokens in `localStorage`, admin-created accounts
-  with an invite link (no self-signup, no email sending). Sign in with either
-  the email address or an optional username; usernames are stored lowercased,
-  so they are unique and matched case-insensitively without `citext`.
+- **Auth** — Auth0. The web app signs in through Auth0's hosted page and
+  sends RS256 access tokens; the API validates them against the tenant's
+  JWKS. Sign-up is open: the first request from a new identity creates a
+  `member` row (or links a pre-existing row with the same verified email).
+  Roles live only in the app's `users` table. The optional `username` is a
+  display handle left over from the old login form.
 
 ## Roles
 
@@ -31,23 +33,26 @@ Same shape as `doctrine`:
 
 ```bash
 # 1. Configure
-cp api/.env.example api/.env      # set DATABASE_URL and JWT_SECRET
-cp web/.env.example web/.env
+cp api/.env.example api/.env      # set DATABASE_URL, AUTH0_DOMAIN, AUTH0_AUDIENCE
+cp web/.env.example web/.env      # set VITE_AUTH0_DOMAIN, VITE_AUTH0_CLIENT_ID, VITE_AUTH0_AUDIENCE
 
 # 2. Create the schema and the first admin
 npm run db:setup
-npm run db:seed                   # admin@transcode.local / Admin123!
+SEED_ADMIN_EMAIL=you@example.com npm run db:seed
 
 # 3. Run both apps
 npm install
 npm run dev                       # api :8082, web :5173
 ```
 
-Generate a secret with `openssl rand -base64 48`.
+In Auth0 you need a **Single Page Application** (callback and logout URLs:
+`http://localhost:5173` and the deployed web origin; Refresh Token Rotation
+on) and an **API** whose identifier is the audience. The Auth0 MCP server's
+onboarding tool sets both up and writes the `.env` values.
 
-Log in as the seeded admin, change the password, then invite your team from
-**Team** — you'll get a link to send each person, and they choose their own
-password.
+Sign in with the seeded email (verified in Auth0) and the row is claimed as
+admin. Everyone else just signs in — they land as members, and you change
+roles from **Team**.
 
 ## Writing a chart
 
@@ -116,14 +121,11 @@ round-trip stability.
 
 ## API
 
-All routes require `Authorization: Bearer <token>` except `/api/health`,
-`/api/auth/login`, and `/api/auth/accept-invite`.
+All routes require `Authorization: Bearer <Auth0 access token>` except
+`/api/health`.
 
 ```
-POST   /api/auth/login
-POST   /api/auth/accept-invite
-GET    /api/auth/me
-POST   /api/auth/change-password
+GET    /api/auth/me               creates or links the account on first call
 
 GET    /api/songs                 ?q= &tag=
 GET    /api/songs/tags
@@ -146,8 +148,6 @@ PUT    /api/setlists/:id/items/:itemId/prefs    any role — own capo/private no
 POST   /api/setlists/:id/reorder  leader+
 
 GET    /api/users                 admin
-POST   /api/users                 admin — returns an invite link
-POST   /api/users/:id/reinvite    admin
 PATCH  /api/users/:id             admin
 DELETE /api/users/:id             admin
 ```
@@ -161,9 +161,11 @@ Two Vercel projects, as in `doctrine`:
   routing, so there is deliberately no `vercel.json`: with this preset a
   rewrite changes the path gin sees and every route 404s. `api/index.go` is
   only used if the preset is switched to "Other" (per-file functions).
-  Set `DATABASE_URL`, `JWT_SECRET`, `WEB_URL` (include the deployed web
-  origin, first).
-- `web/` — `vercel.json` provides the SPA history fallback. Set `VITE_API_URL`.
+  Set `DATABASE_URL`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `WEB_URL` (include
+  the deployed web origin).
+- `web/` — `vercel.json` provides the SPA history fallback. Set `VITE_API_URL`
+  and the three `VITE_AUTH0_*` values, and add the deployed origin to the
+  Auth0 application's callback, logout and web origin lists.
 
 ## Notes on the auth design
 
@@ -173,11 +175,16 @@ Carried over from doctrine deliberately:
   take effect immediately.
 - A DB error during auth returns 500, not 401 — a database blip must not log
   the whole team out.
-- Invite tokens carry `purpose: "invite"` and `RequireAuth` rejects any token
-  with a `purpose` claim, so an invite link can't be used as a session.
 - Admins cannot delete themselves or demote/remove the last admin.
+- Account creation trusts Auth0's `/userinfo`, never the client, for who a
+  token belongs to. Linking to an existing row by email only happens when
+  Auth0 reports the email as verified — otherwise anyone could claim an
+  admin's row by typing that address at sign-up. An unverified newcomer still
+  gets a fresh member row; `verified_at` stays NULL until Auth0 says so.
+- A row whose email is already linked to a different Auth0 identity (say,
+  Google and a password account with the same address) is refused rather
+  than re-pointed, so nobody gets silently logged out of their account.
 
-Known trade-offs, same as doctrine: session tokens last 60 days and can't be
-revoked, and tokens live in `localStorage` (XSS-exposed). Doctrine offsets this
-with an IP allowlist, which this app does not have — worth adding if the
-songbook ever holds anything sensitive.
+Tokens are short-lived and refresh-token rotated by the SDK; they are cached
+in `localStorage` (XSS-exposed, same trade-off as before) because the silent
+iframe alternative doesn't survive Safari or third-party-cookie blocking.

@@ -1,12 +1,15 @@
+import { useAuth0 } from '@auth0/auth0-react';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import api from '@/lib/api';
-import { clearAuth, getCachedUser, getToken, setAuth, setCachedUser, type User } from '@/lib/auth';
+import api, { apiError } from '@/lib/api';
+import { setAccessTokenProvider, type User } from '@/lib/auth';
 import { applyFont, FONTS, getFont, setStoredFont, type FontOption } from '@/lib/fonts';
 
 interface AppContextValue {
   user: User | null;
   loading: boolean;
-  login: (token: string, user: User) => void;
+  /** Why the API refused to sign a valid Auth0 session in, if it did. */
+  authError: string | null;
+  login: (returnTo?: string) => void;
   logout: () => void;
   setUser: (user: User) => void;
   font: FontOption;
@@ -16,10 +19,10 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  // Start from the cached user so the shell renders immediately, then
-  // revalidate — role changes take effect without a re-login.
-  const [user, setUserState] = useState<User | null>(getCachedUser);
-  const [loading, setLoading] = useState(Boolean(getToken()));
+  const auth0 = useAuth0();
+  const [user, setUserState] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [font, setFontState] = useState<FontOption>(getFont);
 
   // Applied as a CSS variable rather than through Chakra's theme so the
@@ -28,40 +31,46 @@ export function AppProvider({ children }: { children: ReactNode }) {
     applyFont(font);
   }, [font]);
 
+  // Hand the SDK's token getter to the API client before any request fires.
   useEffect(() => {
-    if (!getToken()) {
+    setAccessTokenProvider(auth0.isAuthenticated ? () => auth0.getAccessTokenSilently() : null);
+  }, [auth0.isAuthenticated, auth0.getAccessTokenSilently]);
+
+  // Auth0 says who they are; /me says what they are here (role), and on a
+  // first sign-in is the call that creates the account.
+  useEffect(() => {
+    if (auth0.isLoading) return;
+    if (!auth0.isAuthenticated) {
+      setUserState(null);
       setLoading(false);
       return;
     }
+    setLoading(true);
     api
       .get<{ user: User }>('/api/auth/me')
       .then(({ data }) => {
         setUserState(data.user);
-        setCachedUser(data.user);
+        setAuthError(null);
       })
-      .catch(() => {
-        // A 401 is already handled by the interceptor; anything else we
-        // ride out on the cached user.
+      .catch((err) => {
+        setUserState(null);
+        setAuthError(apiError(err, 'Could not sign you in'));
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [auth0.isLoading, auth0.isAuthenticated]);
 
   const value: AppContextValue = {
     user,
-    loading,
-    login: (token, u) => {
-      setAuth(token, u);
-      setUserState(u);
+    loading: auth0.isLoading || loading,
+    authError: auth0.error?.message ?? authError,
+    login: (returnTo = '/') => {
+      auth0.loginWithRedirect({ appState: { returnTo } });
     },
     logout: () => {
-      clearAuth();
       setUserState(null);
-      window.location.href = '/login';
+      auth0.logout({ logoutParams: { returnTo: `${window.location.origin}/login` } });
     },
-    setUser: (u) => {
-      setCachedUser(u);
-      setUserState(u);
-    },
+    setUser: setUserState,
     font,
     setFont: (id) => {
       const next = FONTS.find((f) => f.id === id);

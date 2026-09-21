@@ -1,11 +1,14 @@
 // Command seed creates the first admin, but only if no users exist yet.
+//
+// There is no password: the row is created by email, and the moment that
+// person signs in through Auth0 with the same (verified) address it is linked
+// to their Auth0 identity, admin role intact. Without this, the first person
+// to sign in would just be a member with nobody able to promote them.
 package main
 
 import (
 	"log"
 	"os"
-
-	"golang.org/x/crypto/bcrypt"
 
 	"transcode/api/config"
 	"transcode/api/db"
@@ -28,22 +31,14 @@ func main() {
 
 	email := envOr("SEED_ADMIN_EMAIL", "admin@transcode.local")
 	name := envOr("SEED_ADMIN_NAME", "Admin")
-	password := envOr("SEED_ADMIN_PASSWORD", "Admin123!")
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), 10)
-	if err != nil {
-		log.Fatalf("Failed to hash password: %v", err)
-	}
-
-	// verified_at is set so the seeded admin can log in without the invite flow.
 	if _, err := database.Exec(
-		`INSERT INTO users (email, password_hash, name, role, verified_at)
-		 VALUES ($1, $2, $3, 'admin', NOW())`,
-		email, string(hash), name); err != nil {
+		`INSERT INTO users (email, name, role) VALUES (lower($1), $2, 'admin')`,
+		email, name); err != nil {
 		log.Fatalf("Failed to create admin: %v", err)
 	}
 
-	log.Printf("Created admin %s (password: %s) — change it after first login.", email, password)
+	log.Printf("Created admin %s — sign in through Auth0 with that email to claim it.", email)
 }
 
 func envOr(key, fallback string) string {

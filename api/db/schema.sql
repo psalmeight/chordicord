@@ -16,14 +16,17 @@ CREATE TABLE IF NOT EXISTS "users" (
 	-- makes a plain UNIQUE enough to enforce case-insensitive uniqueness —
 	-- storing mixed case here would let "Dave" and "dave" both exist.
 	"username" varchar(64),
-	"password_hash" varchar(255) NOT NULL,
+	-- Auth0 user id (the token's `sub`). NULL until the person's first
+	-- sign-in links or creates the row; see middleware.RequireAuth.
+	"auth0_sub" varchar(255),
 	"name" varchar(255) NOT NULL,
 	"role" "user_role" DEFAULT 'member' NOT NULL,
 	"verified_at" timestamp,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL,
 	CONSTRAINT "users_email_unique" UNIQUE("email"),
-	CONSTRAINT "users_username_key" UNIQUE("username")
+	CONSTRAINT "users_username_key" UNIQUE("username"),
+	CONSTRAINT "users_auth0_sub_key" UNIQUE("auth0_sub")
 );
 
 CREATE TABLE IF NOT EXISTS "songs" (

@@ -23,6 +23,8 @@ func userPayload(u *models.User) gin.H {
 		"name":       u.Name,
 		"role":       u.Role,
 		"verifiedAt": u.VerifiedAt,
+		// Pre-Auth0 accounts sit unlinked until their owner signs in once.
+		"linked": u.Auth0Sub != nil,
 	}
 }
 
@@ -68,14 +70,4 @@ func isUniqueViolation(err error) (string, bool) {
 		return pgErr.ConstraintName, true
 	}
 	return "", false
-}
-
-// firstOrigin picks the primary origin out of the comma-separated WEB_URL,
-// for building links we hand to humans.
-func firstOrigin(webURL string) string {
-	parts := strings.Split(webURL, ",")
-	if len(parts) == 0 {
-		return ""
-	}
-	return strings.TrimSpace(parts[0])
 }

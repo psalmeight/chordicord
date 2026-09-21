@@ -1,37 +1,11 @@
-import { Box, Button, Center, Heading, Input, Stack, Text } from '@chakra-ui/react';
-import { useState, type FormEvent } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
-import api, { apiError } from '@/lib/api';
-import type { User } from '@/lib/auth';
+import { Box, Button, Center, Heading, Stack, Text } from '@chakra-ui/react';
+import { Navigate } from 'react-router-dom';
 import { useApp } from '@/contexts/AppContext';
 
 export default function Login() {
-  const { user, login } = useApp();
-  const navigate = useNavigate();
-  const [identifier, setIdentifier] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const { user, loading, login, logout, authError } = useApp();
 
   if (user) return <Navigate to="/" replace />;
-
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setError('');
-    try {
-      const { data } = await api.post<{ token: string; user: User }>('/api/auth/login', {
-        identifier,
-        password,
-      });
-      login(data.token, data.user);
-      navigate(data.user.verifiedAt ? '/' : '/set-password', { replace: true });
-    } catch (err) {
-      setError(apiError(err, 'Login failed'));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
     <Center minH="100vh" bg="gray.950">
@@ -49,39 +23,27 @@ export default function Login() {
           FCF Chords
         </Heading>
         <Text color="gray.600" fontSize="sm" mb={6}>
-          Sign in to your team's songbook.
+          Sign in to your team's songbook. New here? Signing in creates your account.
         </Text>
 
-        <form onSubmit={submit}>
-          <Stack gap={3}>
-            {/* Not type="email": the browser would reject a bare username as
-                malformed before the request ever left. */}
-            <Input
-              type="text"
-              placeholder="Email or username"
-              value={identifier}
-              onChange={(e) => setIdentifier(e.target.value)}
-              autoComplete="username"
-              required
-            />
-            <Input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              required
-            />
-            {error && (
-              <Text color="red.600" fontSize="sm">
-                {error}
-              </Text>
-            )}
-            <Button type="submit" colorPalette="brand" loading={busy}>
+        <Stack gap={3}>
+          {authError && (
+            <Text color="red.600" fontSize="sm">
+              {authError}
+            </Text>
+          )}
+          {/* A valid Auth0 session the API refused (unverified email, and so
+              on) needs a sign-out to try again, not another sign-in. */}
+          {authError ? (
+            <Button variant="outline" onClick={logout}>
+              Sign out and try again
+            </Button>
+          ) : (
+            <Button colorPalette="brand" loading={loading} onClick={() => login('/')}>
               Sign in
             </Button>
-          </Stack>
-        </form>
+          )}
+        </Stack>
       </Box>
     </Center>
   );

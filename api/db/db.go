@@ -49,7 +49,6 @@ func Migrate(database *sqlx.DB) {
 		`CREATE TABLE IF NOT EXISTS users (
 			id uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 			email varchar(255) NOT NULL UNIQUE,
-			password_hash varchar(255) NOT NULL,
 			name varchar(255) NOT NULL,
 			role user_role DEFAULT 'member' NOT NULL,
 			verified_at timestamp,
@@ -222,6 +221,15 @@ func Migrate(database *sqlx.DB) {
 		// The setlist item's snapshot of it, copied at add-time and on resync
 		// like every other chart field. Same no-backfill rule.
 		`ALTER TABLE setlist_items ADD COLUMN IF NOT EXISTS content_v2 text NOT NULL DEFAULT '';`,
+
+		// Auth moved to Auth0. auth0_sub is the identity we trust; it is
+		// filled in on a person's first sign-in, either by creating their row
+		// or by linking a pre-existing row with the same (verified) email. The
+		// password column is kept but no longer written, so it must accept
+		// NULL for rows created from now on.
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS auth0_sub varchar(255);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS users_auth0_sub_key ON users (auth0_sub);`,
+		`ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;`,
 	}
 
 	for _, s := range stmts {
