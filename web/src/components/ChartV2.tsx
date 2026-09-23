@@ -1,5 +1,5 @@
 import { Box, Text } from '@chakra-ui/react';
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { transposeContent } from '@/lib/chordpro';
 import { parseChord } from '@/lib/chords';
@@ -315,11 +315,18 @@ export function ChartV2Editor({
   fontSize: number;
 }) {
   const areaRef = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
+  // Measuring means collapsing to height:auto for a moment. The wrapper holds
+  // the old height meanwhile: without it the page (or the modal body) would
+  // briefly get shorter, the browser would clamp its scroll offset, and every
+  // keystroke would yank the view upward.
+  useLayoutEffect(() => {
     const el = areaRef.current;
-    if (!el) return;
+    const holder = el?.parentElement;
+    if (!el || !holder) return;
+    holder.style.minHeight = `${holder.offsetHeight}px`;
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight}px`;
+    holder.style.minHeight = '';
   }, [value, fontSize]);
 
   return (
