@@ -5,6 +5,7 @@ import { useApp } from './contexts/AppContext';
 import { canManage } from './lib/auth';
 import Layout from './components/Layout';
 import Login from './pages/Login';
+import Pending from './pages/Pending';
 import Prayers from './pages/Prayers';
 import Categories from './pages/Categories';
 
@@ -19,6 +20,7 @@ function Protected({ children, adminOnly }: { children: ReactNode; adminOnly?: b
     );
   }
   if (!user) return <Navigate to="/login" replace />;
+  if (!user.approvedAt) return <Pending />;
   if (adminOnly && !canManage(user)) return <Navigate to="/" replace />;
 
   return <Layout>{children}</Layout>;

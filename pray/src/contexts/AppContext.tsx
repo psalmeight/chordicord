@@ -10,6 +10,8 @@ interface AppContextValue {
   authError: string | null;
   login: (returnTo?: string) => void;
   logout: () => void;
+  /** Re-asks the API who they are, e.g. after verifying their email. */
+  refresh: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -54,6 +56,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     authError: auth0.error?.message ?? authError,
     login: (returnTo = '/') => {
       auth0.loginWithRedirect({ appState: { returnTo } });
+    },
+    refresh: async () => {
+      // A fresh token first, so the API's check with Auth0 sees an email
+      // verified since this session started.
+      await auth0.getAccessTokenSilently({ cacheMode: 'off' }).catch(() => undefined);
+      try {
+        const { data } = await api.get<{ user: User }>('/api/auth/me');
+        setUser(data.user);
+        setAuthError(null);
+      } catch (err) {
+        setAuthError(apiError(err, 'Could not check your account'));
+      }
     },
     logout: () => {
       setUser(null);

@@ -23,6 +23,7 @@ func userPayload(u *models.User) gin.H {
 		"name":       u.Name,
 		"role":       u.Role,
 		"verifiedAt": u.VerifiedAt,
+		"approvedAt": u.ApprovedAt,
 		// Pre-Auth0 accounts sit unlinked until their owner signs in once.
 		"linked": u.Auth0Sub != nil,
 	}

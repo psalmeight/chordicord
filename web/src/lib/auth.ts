@@ -10,6 +10,8 @@ export interface User {
   verifiedAt: string | null;
   /** False for an account from before Auth0 whose owner hasn't signed in since. */
   linked: boolean;
+  /** Null while the sign-up waits for an admin; nothing else is reachable until then. */
+  approvedAt: string | null;
 }
 
 /**

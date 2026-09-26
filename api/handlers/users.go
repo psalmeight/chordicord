@@ -16,8 +16,8 @@ func ListUsers(database *sqlx.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var users []models.User
 		err := database.Select(&users,
-			`SELECT id, email, username, auth0_sub, name, role, verified_at, created_at, updated_at
-			 FROM users ORDER BY name`)
+			`SELECT id, email, username, auth0_sub, name, role, verified_at, approved_at, created_at, updated_at
+			 FROM users ORDER BY approved_at IS NOT NULL, name`)
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Failed to load users"})
 			return
@@ -40,6 +40,9 @@ func UpdateUser(database *sqlx.DB) gin.HandlerFunc {
 			// ClearUsername is the explicit flag, as on setlist items.
 			Username      *string `json:"username"`
 			ClearUsername bool    `json:"clearUsername"`
+			// Lets a pending sign-up in. One-way: to turn someone away,
+			// delete them instead.
+			Approve bool `json:"approve"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(400, gin.H{"error": "Invalid request"})
@@ -67,16 +70,32 @@ func UpdateUser(database *sqlx.DB) gin.HandlerFunc {
 			}
 		}
 
+		// Approval only ever follows a verified email, so an address nobody
+		// has proven they own can't be let in.
+		if body.Approve {
+			var verified bool
+			if err := database.Get(&verified,
+				`SELECT verified_at IS NOT NULL FROM users WHERE id = $1`, id); err != nil {
+				c.JSON(404, gin.H{"error": "User not found"})
+				return
+			}
+			if !verified {
+				c.JSON(400, gin.H{"error": "They need to verify their email address before you can approve them"})
+				return
+			}
+		}
+
 		var user models.User
 		err := database.Get(&user,
 			`UPDATE users SET
 				name = COALESCE($1, name),
 				role = COALESCE($2, role)::user_role,
 				username = CASE WHEN $3 THEN NULL ELSE COALESCE($4, username) END,
+				approved_at = CASE WHEN $6 THEN COALESCE(approved_at, NOW()) ELSE approved_at END,
 				updated_at = NOW()
 			 WHERE id = $5
-			 RETURNING id, email, username, auth0_sub, name, role, verified_at, created_at, updated_at`,
-			body.Name, body.Role, body.ClearUsername, body.Username, id)
+			 RETURNING id, email, username, auth0_sub, name, role, verified_at, approved_at, created_at, updated_at`,
+			body.Name, body.Role, body.ClearUsername, body.Username, id, body.Approve)
 		if err != nil {
 			if name, ok := isUniqueViolation(err); ok && name == "users_username_key" {
 				c.JSON(400, gin.H{"error": "That username is already taken"})

@@ -45,3 +45,8 @@ DELETE /api/prayer/prayers/:id     admin
 
 A third Vercel project with root directory `pray` (the `vercel.json` gives it
 the SPA fallback). Set `VITE_API_URL` and the three `VITE_AUTH0_*` values.
+
+The app lives only at https://pray.fcftagbilaran.com. `vercel.json` sends any
+`*.vercel.app` host (the project's default domain and every deployment URL)
+there with a permanent redirect, so Auth0 and the API's `WEB_URL` only need to
+list the custom domain.

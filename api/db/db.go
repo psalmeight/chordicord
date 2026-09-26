@@ -230,6 +230,14 @@ func Migrate(database *sqlx.DB) {
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS auth0_sub varchar(255);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS users_auth0_sub_key ON users (auth0_sub);`,
 		`ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;`,
+
+		// Sign-up needs an admin's approval (after the email is verified).
+		// The column is added with a NOW() default so every account that
+		// already exists is approved as it lands, then the default is dropped
+		// so rows created from here on start out pending. Both statements are
+		// no-ops on later runs.
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS approved_at timestamp DEFAULT now();`,
+		`ALTER TABLE users ALTER COLUMN approved_at DROP DEFAULT;`,
 	}
 
 	for _, s := range stmts {

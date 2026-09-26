@@ -52,6 +52,16 @@ export default function Users() {
     }
   };
 
+  const approve = async (id: string) => {
+    setError('');
+    try {
+      await api.patch(`/api/users/${id}`, { approve: true });
+      load();
+    } catch (err) {
+      setError(apiError(err, 'Could not approve'));
+    }
+  };
+
   const remove = async (u: User) => {
     if (!confirm(`Remove ${u.name} from the team?`)) return;
     try {
@@ -68,7 +78,8 @@ export default function Users() {
         <Heading size="lg">Team</Heading>
         {/* No invite step: signing in through Auth0 is what adds someone. */}
         <Text fontSize="sm" color="gray.600" mt={1}>
-          Anyone who signs in is added as a member. Change their role here.
+          New sign-ups wait at the top until they've verified their email and you approve them. Approved
+          people use both the songbook and the prayer list.
         </Text>
       </Box>
 
@@ -79,12 +90,23 @@ export default function Users() {
       ) : (
         <Stack gap={2}>
           {users.map((u) => (
-            <Box key={u.id} bg="white" p={4} borderRadius="lg" borderWidth="1px">
+            <Box
+              key={u.id}
+              bg="white"
+              p={4}
+              borderRadius="lg"
+              borderWidth="1px"
+              borderLeftWidth={u.approvedAt ? '1px' : '4px'}
+              borderLeftColor={u.approvedAt ? undefined : 'orange.400'}
+            >
               <Flex justify="space-between" align="center" gap={3} wrap="wrap">
                 <Box>
                   <HStack gap={2}>
                     <Text fontWeight="semibold">{u.name}</Text>
                     {!u.linked && <Badge colorPalette="orange">Not signed in yet</Badge>}
+                    {!u.approvedAt && (
+                      <Badge colorPalette="orange">{u.verifiedAt ? 'Awaiting approval' : 'Email not verified'}</Badge>
+                    )}
                     {u.id === me?.id && <Badge variant="outline">You</Badge>}
                   </HStack>
                   <Text fontSize="sm" color="gray.600">
@@ -127,6 +149,17 @@ export default function Users() {
                 </Box>
 
                 <HStack gap={2}>
+                  {!u.approvedAt && (
+                    <Button
+                      size="sm"
+                      colorPalette="brand"
+                      disabled={!u.verifiedAt}
+                      title={u.verifiedAt ? undefined : 'They need to verify their email first'}
+                      onClick={() => approve(u.id)}
+                    >
+                      Approve
+                    </Button>
+                  )}
                   <Select
                     value={u.role}
                     onChange={(v) => changeRole(u.id, v as Role)}

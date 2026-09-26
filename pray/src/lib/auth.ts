@@ -6,6 +6,9 @@ export interface User {
   email: string;
   name: string;
   role: Role;
+  verifiedAt: string | null;
+  /** Null while the sign-up waits for an admin; nothing else is reachable until then. */
+  approvedAt: string | null;
 }
 
 /**

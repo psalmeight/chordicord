@@ -23,7 +23,7 @@ export default function Login() {
           FCF Chords
         </Heading>
         <Text color="gray.600" fontSize="sm" mb={6}>
-          Sign in to your team's songbook. New here? Signing in creates your account.
+          Sign in to your team's songbook. New here? Sign in to request access.
         </Text>
 
         <Stack gap={3}>

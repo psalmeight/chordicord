@@ -5,6 +5,7 @@ import { useApp } from './contexts/AppContext';
 import type { Role } from './lib/auth';
 import Layout from './components/Layout';
 import Login from './pages/Login';
+import Pending from './pages/Pending';
 import Songs from './pages/Songs';
 import SongView from './pages/SongView';
 import SongEditor from './pages/SongEditor';
@@ -25,6 +26,7 @@ function Protected({ children, roles }: { children: ReactNode; roles?: Role[] })
     );
   }
   if (!user) return <Navigate to="/login" replace />;
+  if (!user.approvedAt) return <Pending />;
   if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
 
   return <Layout>{children}</Layout>;

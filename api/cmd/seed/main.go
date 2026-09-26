@@ -33,7 +33,7 @@ func main() {
 	name := envOr("SEED_ADMIN_NAME", "Admin")
 
 	if _, err := database.Exec(
-		`INSERT INTO users (email, name, role) VALUES (lower($1), $2, 'admin')`,
+		`INSERT INTO users (email, name, role, approved_at) VALUES (lower($1), $2, 'admin', NOW())`,
 		email, name); err != nil {
 		log.Fatalf("Failed to create admin: %v", err)
 	}

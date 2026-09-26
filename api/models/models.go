@@ -65,6 +65,9 @@ type User struct {
 	Name       string     `db:"name" json:"name"`
 	Role       string     `db:"role" json:"role"`
 	VerifiedAt *time.Time `db:"verified_at" json:"verifiedAt"`
+	// nil while the account waits for an admin; until then the only thing
+	// it can reach is /api/auth/me.
+	ApprovedAt *time.Time `db:"approved_at" json:"approvedAt"`
 	CreatedAt  time.Time  `db:"created_at" json:"createdAt"`
 	UpdatedAt  time.Time  `db:"updated_at" json:"updatedAt"`
 }

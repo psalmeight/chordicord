@@ -39,14 +39,17 @@ func New(database *sqlx.DB, cfg *config.Config) *gin.Engine {
 
 	store := storage.New(cfg.SupabaseURL, cfg.SupabaseKey, cfg.SupabaseBucket)
 
-	auth := middleware.RequireAuth(database, cfg.Auth0Domain, cfg.Auth0Audience)
+	authn := middleware.NewAuth(database, cfg.Auth0Domain, cfg.Auth0Audience)
+	// Every route needs an approved account except /me, which is how a
+	// pending one finds out it's pending.
+	auth := authn.Approved()
 	adminOnly := middleware.RequireRole("admin")
 	editors := middleware.RequireRole("admin", "leader")
 
 	// Sign-in, sign-up and passwords all live at Auth0; the API only ever
 	// sees bearer tokens. /me is the first call after login and is what
 	// creates or links the users row.
-	r.GET("/api/auth/me", auth, handlers.Me())
+	r.GET("/api/auth/me", authn.SignedIn(), handlers.Me())
 
 	// Songs — everyone on the team reads, leaders and admins write.
 	songs := r.Group("/api/songs")

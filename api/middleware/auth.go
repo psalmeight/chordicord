@@ -20,16 +20,21 @@ import (
 	"transcode/api/models"
 )
 
-const userColumns = `id, email, username, auth0_sub, name, role, verified_at, created_at, updated_at`
+const userColumns = `id, email, username, auth0_sub, name, role, verified_at, approved_at, created_at, updated_at`
 
-// RequireAuth validates the Auth0 access token and re-loads the user on every
-// request, so role changes and deletions take effect immediately.
+// Auth validates Auth0 access tokens and re-loads the user on every request,
+// so role changes, approvals and deletions take effect immediately.
 //
-// Sign-up is open: the first request carrying a token for an unknown `sub`
-// creates that person as a member (or links them to a pre-existing row with
-// the same verified email, which is how accounts from before Auth0 keep their
-// role). Roles never come from Auth0 — they live only in the users table.
-func RequireAuth(database *sqlx.DB, auth0Domain, audience string) gin.HandlerFunc {
+// Anyone can sign up: the first request carrying a token for an unknown `sub`
+// creates that person as a pending member (or links them to a pre-existing
+// row with the same verified email, which is how accounts from before Auth0
+// keep their role). A pending account can only reach the routes behind
+// SignedIn — in practice /api/auth/me, so the apps can tell them why they're
+// waiting — until they've verified their email and an admin has approved
+// them. Roles never come from Auth0; they live only in the users table.
+type Auth struct{ a *authn }
+
+func NewAuth(database *sqlx.DB, auth0Domain, audience string) *Auth {
 	issuer, err := url.Parse("https://" + auth0Domain + "/")
 	if err != nil {
 		log.Fatalf("Invalid AUTH0_DOMAIN: %v", err)
@@ -47,47 +52,100 @@ func RequireAuth(database *sqlx.DB, auth0Domain, audience string) gin.HandlerFun
 	if err != nil {
 		log.Fatalf("Failed to set up Auth0 token validator: %v", err)
 	}
-	a := &authn{db: database, validator: v, userinfoURL: issuer.String() + "userinfo"}
+	return &Auth{a: &authn{db: database, validator: v, userinfoURL: issuer.String() + "userinfo"}}
+}
 
+// SignedIn lets through any valid session, approved or not.
+func (x *Auth) SignedIn() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		raw := c.GetHeader("Authorization")
-		token := strings.TrimSpace(strings.TrimPrefix(raw, "Bearer "))
-		if token == "" {
-			c.AbortWithStatusJSON(401, gin.H{"error": "Unauthorized"})
-			return
+		if x.a.authenticate(c) != nil {
+			c.Next()
 		}
+	}
+}
 
-		claims, err := a.validator.ValidateToken(c.Request.Context(), token)
-		if err != nil {
-			c.AbortWithStatusJSON(401, gin.H{"error": "Unauthorized"})
+// Approved lets through only accounts an admin has approved.
+func (x *Auth) Approved() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		user := x.a.authenticate(c)
+		if user == nil {
 			return
 		}
-		sub := claims.(*validator.ValidatedClaims).RegisteredClaims.Subject
-		if sub == "" {
-			c.AbortWithStatusJSON(401, gin.H{"error": "Unauthorized"})
+		if user.ApprovedAt == nil {
+			c.AbortWithStatusJSON(403, gin.H{"error": "Your account is waiting for approval", "code": "pending_approval"})
 			return
 		}
-
-		var user models.User
-		err = database.Get(&user, `SELECT `+userColumns+` FROM users WHERE auth0_sub = $1`, sub)
-		if errors.Is(err, sql.ErrNoRows) {
-			u, status, perr := a.provision(c.Request.Context(), sub, token)
-			if perr != nil {
-				c.AbortWithStatusJSON(status, gin.H{"error": perr.Error()})
-				return
-			}
-			user = *u
-			err = nil
-		}
-		if err != nil {
-			// A DB blip is not an auth failure — don't log everyone out.
-			c.AbortWithStatusJSON(500, gin.H{"error": "Internal error"})
-			return
-		}
-
-		c.Set("user", &user)
 		c.Next()
 	}
+}
+
+// authenticate resolves the request's user and stores it on the context, or
+// aborts the request and returns nil.
+func (a *authn) authenticate(c *gin.Context) *models.User {
+	raw := c.GetHeader("Authorization")
+	token := strings.TrimSpace(strings.TrimPrefix(raw, "Bearer "))
+	if token == "" {
+		c.AbortWithStatusJSON(401, gin.H{"error": "Unauthorized"})
+		return nil
+	}
+
+	claims, err := a.validator.ValidateToken(c.Request.Context(), token)
+	if err != nil {
+		c.AbortWithStatusJSON(401, gin.H{"error": "Unauthorized"})
+		return nil
+	}
+	sub := claims.(*validator.ValidatedClaims).RegisteredClaims.Subject
+	if sub == "" {
+		c.AbortWithStatusJSON(401, gin.H{"error": "Unauthorized"})
+		return nil
+	}
+
+	var user models.User
+	provisioned := false
+	err = a.db.Get(&user, `SELECT `+userColumns+` FROM users WHERE auth0_sub = $1`, sub)
+	if errors.Is(err, sql.ErrNoRows) {
+		u, status, perr := a.provision(c.Request.Context(), sub, token)
+		if perr != nil {
+			c.AbortWithStatusJSON(status, gin.H{"error": perr.Error()})
+			return nil
+		}
+		user = *u
+		provisioned = true
+		err = nil
+	}
+	if err != nil {
+		// A DB blip is not an auth failure — don't log everyone out.
+		c.AbortWithStatusJSON(500, gin.H{"error": "Internal error"})
+		return nil
+	}
+
+	// A pending sign-up who hadn't verified yet may have clicked the link
+	// since. Only they pay for the extra round trip to Auth0, and not on the
+	// request that just asked Auth0 while creating their row.
+	if !provisioned && user.ApprovedAt == nil && user.VerifiedAt == nil {
+		a.refreshVerified(c.Request.Context(), &user, token)
+	}
+
+	c.Set("user", &user)
+	return &user
+}
+
+// refreshVerified records the email as verified once Auth0 says it is. A
+// failure just leaves the account unverified until the next request.
+func (a *authn) refreshVerified(ctx context.Context, user *models.User, token string) {
+	p, err := a.userinfo(ctx, token)
+	if err != nil || !p.EmailVerified {
+		return
+	}
+	var updated models.User
+	err = a.db.GetContext(ctx, &updated,
+		`UPDATE users SET verified_at = COALESCE(verified_at, NOW()), updated_at = NOW()
+		 WHERE id = $1 RETURNING `+userColumns, user.ID)
+	if err != nil {
+		log.Printf("recording email verification for %s failed: %v", user.ID, err)
+		return
+	}
+	*user = updated
 }
 
 type authn struct {
