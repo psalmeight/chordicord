@@ -1,0 +1,71 @@
+import { useAuth0 } from '@auth0/auth0-react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import api, { apiError } from '@/lib/api';
+import { setAccessTokenProvider, type User } from '@/lib/auth';
+
+interface AppContextValue {
+  user: User | null;
+  loading: boolean;
+  /** Why the API refused to sign a valid Auth0 session in, if it did. */
+  authError: string | null;
+  login: (returnTo?: string) => void;
+  logout: () => void;
+}
+
+const AppContext = createContext<AppContextValue | null>(null);
+
+export function AppProvider({ children }: { children: ReactNode }) {
+  const auth0 = useAuth0();
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  // Hand the SDK's token getter to the API client before any request fires.
+  useEffect(() => {
+    setAccessTokenProvider(auth0.isAuthenticated ? () => auth0.getAccessTokenSilently() : null);
+  }, [auth0.isAuthenticated, auth0.getAccessTokenSilently]);
+
+  // Auth0 says who they are; /me says what they are here (role), and on a
+  // first sign-in is the call that creates the account.
+  useEffect(() => {
+    if (auth0.isLoading) return;
+    if (!auth0.isAuthenticated) {
+      setUser(null);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    api
+      .get<{ user: User }>('/api/auth/me')
+      .then(({ data }) => {
+        setUser(data.user);
+        setAuthError(null);
+      })
+      .catch((err) => {
+        setUser(null);
+        setAuthError(apiError(err, 'Could not sign you in'));
+      })
+      .finally(() => setLoading(false));
+  }, [auth0.isLoading, auth0.isAuthenticated]);
+
+  const value: AppContextValue = {
+    user,
+    loading: auth0.isLoading || loading,
+    authError: auth0.error?.message ?? authError,
+    login: (returnTo = '/') => {
+      auth0.loginWithRedirect({ appState: { returnTo } });
+    },
+    logout: () => {
+      setUser(null);
+      auth0.logout({ logoutParams: { returnTo: `${window.location.origin}/login` } });
+    },
+  };
+
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+}
+
+export function useApp() {
+  const ctx = useContext(AppContext);
+  if (!ctx) throw new Error('useApp must be used within AppProvider');
+  return ctx;
+}

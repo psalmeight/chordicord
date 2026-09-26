@@ -5,6 +5,7 @@ import (
 
 	"transcode/api/config"
 	"transcode/api/db"
+	"transcode/api/prayer"
 	"transcode/api/router"
 )
 
@@ -14,6 +15,7 @@ func main() {
 	database := db.Connect(cfg.DatabaseURL)
 	defer database.Close()
 	db.Migrate(database)
+	prayer.Migrate(database)
 
 	r := router.New(database, cfg)
 	log.Printf("transcode api listening on :%s", cfg.Port)

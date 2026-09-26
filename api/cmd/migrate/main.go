@@ -9,6 +9,7 @@ import (
 
 	"transcode/api/config"
 	"transcode/api/db"
+	"transcode/api/prayer"
 )
 
 func main() {
@@ -31,5 +32,6 @@ func main() {
 	}
 
 	db.Migrate(database)
+	prayer.Migrate(database)
 	log.Println("Migrations applied.")
 }

@@ -10,6 +10,7 @@ import (
 
 	"transcode/api/config"
 	"transcode/api/db"
+	"transcode/api/prayer"
 	"transcode/api/router"
 )
 
@@ -23,6 +24,7 @@ func boot() {
 	cfg := config.Load()
 	database := db.Connect(cfg.DatabaseURL)
 	db.Migrate(database)
+	prayer.Migrate(database)
 	app = router.New(database, cfg)
 }
 

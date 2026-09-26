@@ -11,6 +11,7 @@ import (
 	"transcode/api/config"
 	"transcode/api/handlers"
 	"transcode/api/middleware"
+	"transcode/api/prayer"
 	"transcode/api/storage"
 )
 
@@ -93,6 +94,10 @@ func New(database *sqlx.DB, cfg *config.Config) *gin.Engine {
 	users.GET("", handlers.ListUsers(database))
 	users.PATCH("/:id", handlers.UpdateUser(database))
 	users.DELETE("/:id", handlers.DeleteUser(database))
+
+	// The prayer list app (web: pray/). Its own schema and package; same
+	// sign-in and roles.
+	prayer.Register(r, database, auth, adminOnly)
 
 	return r
 }
