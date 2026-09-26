@@ -1,4 +1,4 @@
-import { Box, Button, Flex, HStack, Heading, Spinner, Stack, Text } from '@chakra-ui/react';
+import { Box, Button, Checkbox, Flex, HStack, Heading, Spinner, Stack, Text } from '@chakra-ui/react';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import api, { apiError } from '@/lib/api';
@@ -10,6 +10,45 @@ import type { Category, Prayer } from '@/types';
 /** 'all', 'none' (uncategorized) or a category id. */
 type Filter = string;
 
+// Per-viewer conveniences, kept in this browser only. Storage can be missing
+// or throw (private mode, blocked site data), so every access is guarded and
+// the page works the same without it.
+const FILTER_KEY = 'pray.filter';
+const doneKey = (userId: string) => `pray.done.${userId}`;
+
+function load(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function save(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Not remembered this time; nothing else depends on it.
+  }
+}
+
+/** Local calendar day, so ticks reset at the viewer's midnight. */
+function today(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+/** Today's ticked prayer ids; yesterday's list comes back empty. */
+function loadDone(userId: string): Set<string> {
+  try {
+    const saved = JSON.parse(load(doneKey(userId)) ?? 'null');
+    if (saved?.date === today() && Array.isArray(saved.ids)) return new Set(saved.ids);
+  } catch {
+    // Unreadable; start the day fresh.
+  }
+  return new Set();
+}
+
 export default function Prayers() {
   const { user } = useApp();
   const admin = canManage(user);
@@ -17,7 +56,8 @@ export default function Prayers() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [filter, setFilter] = useState<Filter>('all');
+  const [filter, setFilterState] = useState<Filter>(() => load(FILTER_KEY) ?? 'all');
+  const [done, setDone] = useState<Set<string>>(() => (user ? loadDone(user.id) : new Set()));
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -30,6 +70,27 @@ export default function Prayers() {
       .catch((err) => setError(apiError(err, 'Could not load prayers')))
       .finally(() => setLoading(false));
   }, []);
+
+  const setFilter = (value: Filter) => {
+    setFilterState(value);
+    save(FILTER_KEY, value);
+  };
+
+  const toggleDone = (id: string, checked: boolean) => {
+    // Reload first so a list left open overnight doesn't carry yesterday's ticks.
+    const next = user ? loadDone(user.id) : new Set(done);
+    if (checked) next.add(id);
+    else next.delete(id);
+    setDone(next);
+    if (user) save(doneKey(user.id), JSON.stringify({ date: today(), ids: [...next] }));
+  };
+
+  // A remembered category that has since been deleted falls back to All.
+  useEffect(() => {
+    if (!loading && filter !== 'all' && filter !== 'none' && !categories.some((c) => c.id === filter)) {
+      setFilter('all');
+    }
+  }, [loading, categories, filter]);
 
   // One section per category that has prayers, in category order, then the
   // uncategorized ones. A filter narrows this to a single section.
@@ -162,7 +223,7 @@ export default function Prayers() {
                 borderTopWidth="3px"
                 borderTopColor="brand.600"
               >
-                <Heading as="h2" size="md" color="gray.800">
+                <Heading as="h2" size="sm" color="gray.800">
                   {section.title}
                 </Heading>
                 <Text
@@ -175,7 +236,7 @@ export default function Prayers() {
                   borderRadius="full"
                   flexShrink={0}
                 >
-                  {section.items.length}
+                  {section.items.filter((p) => done.has(p.id)).length}/{section.items.length}
                 </Text>
               </Flex>
 
@@ -185,7 +246,7 @@ export default function Prayers() {
                     as="li"
                     key={prayer.id}
                     px={5}
-                    py={3}
+                    py={2.5}
                     borderTopWidth="1px"
                     borderColor="gray.100"
                     _first={{ borderTopWidth: 0 }}
@@ -199,14 +260,30 @@ export default function Prayers() {
                         onCancel={() => setEditingId(null)}
                       />
                     ) : (
-                      <Flex gap={3} align="flex-start">
-                        <Box w="6px" h="6px" mt="9px" borderRadius="full" bg="brand.500" flexShrink={0} />
+                      <Flex gap={3} align="flex-start" opacity={done.has(prayer.id) ? 0.55 : 1}>
+                        <Checkbox.Root
+                          size="sm"
+                          colorPalette="brand"
+                          mt="2px"
+                          flexShrink={0}
+                          checked={done.has(prayer.id)}
+                          onCheckedChange={(e) => toggleDone(prayer.id, e.checked === true)}
+                          aria-label={`Prayed for ${prayer.title}`}
+                        >
+                          <Checkbox.HiddenInput />
+                          <Checkbox.Control cursor="pointer" />
+                        </Checkbox.Root>
                         <Box flex={1} minW={0}>
-                          <Text fontWeight="medium" color="gray.800">
+                          <Text
+                            fontSize="sm"
+                            fontWeight="medium"
+                            color="gray.800"
+                            textDecoration={done.has(prayer.id) ? 'line-through' : undefined}
+                          >
                             {prayer.title}
                           </Text>
                           {prayer.details && (
-                            <Text mt={1} fontSize="sm" color="gray.600" whiteSpace="pre-wrap" lineHeight="tall">
+                            <Text mt={0.5} fontSize="xs" color="gray.600" whiteSpace="pre-wrap" lineHeight="tall">
                               {prayer.details}
                             </Text>
                           )}
